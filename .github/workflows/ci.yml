@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Lint (unused imports & pyflakes)
+        run: uvx ruff check src tests
+
+      - name: Typecheck
+        run: uvx ty check src
+
+      # A labeled early signal for the agent contract: help/SKILL.md and
+      # the committed surface snapshot must match the command tree. The
+      # full suite below runs these too; this step names the failure.
+      - name: Agent contract drift guard (help, SKILL.md, help.json)
+        run: uv run pytest tests/test_help.py -q
+
+      - name: Run tests
+        run: uv run pytest -q

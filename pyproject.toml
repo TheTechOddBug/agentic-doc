@@ -1,100 +1,40 @@
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-name = "agentic-doc"
-version = "0.3.3"
-description = "A Python library that wraps around VisionAgent document extraction REST API to make documents extraction easy."
-authors = ["Landing AI <dev@landing.ai>"]
+[project]
+name = "ade-cli"
+version = "1.0.0"
+description = "CLI for Agentic Document Extraction (ADE) — parse and extract documents with the v2 APIs, backed by a local store"
 readme = "README.md"
-packages = [{include = "agentic_doc"}]
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12",
+    "httpx>=0.27",
+    "pypdfium2>=4.30",
+    "pillow>=10",
+]
 
-[tool.poetry.urls]
-"Homepage" = "https://va.landing.ai/demo/doc-extraction"
-"repository" = "https://github.com/landing-ai/agentic-doc"
-"documentation" = "https://github.com/landing-ai/agentic-doc"
+[project.scripts]
+ade = "ade_cli.main:app"
 
-[tool.poetry.dependencies]  # main dependency group
-python = ">=3.9,<4.0"
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+# Only the release workflow syncs this group — PyInstaller stays out of
+# dev/test environments.
+release = [
+    "pyinstaller>=6.16",
+]
 
-tqdm = ">=4.64.0,<5.0.0"
-typing_extensions = "4.*"
-pydantic = ">=2.8.0"
-pydantic-settings = "^2.2.1"
-tenacity = ">=8.0.0"
-pillow = ">=10.0.0"
-pillow-heif = ">=0.17.0"
-pypdf = "^5.3.1"
-structlog = "^25.2.0"
-httpx = "^0.28.1"
-pymupdf = "^1.25.5"
-opencv-python-headless = "^4.11.0.86"
-google-api-python-client = "^2.170.0"
-google-auth-oauthlib = "^1.2.2"
-google-auth = "^2.40.2"
-boto3 = "^1.38.23"
-jsonschema = "^4.24.0"
-types-jsonschema = "^4.24.0.20250528"
-requests = "^2.32.4"
-protobuf = "^6.31.1"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-
-[tool.poetry.group.dev.dependencies]
-autoflake = "1.*"
-pytest = "^7.0.0"
-black = ">=23,<25"
-isort = "5.*"
-responses = "^0.23.1"
-mypy = "<1.8.0"
-types-requests = "^2.31.0.0"
-types-pillow = "^9.5.0.4"
-data-science-types = "^0.2.23"
-types-tqdm = "^4.65.0.1"
-setuptools = ">=70,<79"
-mkdocs = "^1.5.3"
-mkdocstrings = {extras = ["python"], version = "^0.23.0"}
-mkdocs-material = "^9.4.2"
-pre-commit = "^3.8.0"
-flake8 = "^7.1.2"
-reportlab = "^4.3.1"
-pytest-xdist = "^3.6.1"
+[tool.hatch.build.targets.wheel]
+packages = ["src/ade_cli"]
 
 [tool.pytest.ini_options]
-log_cli = true
-log_cli_level = "INFO"
-log_cli_format = "%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)s)"
-log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+testpaths = ["tests"]
 
-[tool.black]
-exclude = '.vscode|.eggs|venv'
-line-length = 88  # suggested by black official site
-
-[tool.isort]
-line_length = 88
-profile = "black"
-
-[tool.mypy]
-plugins = "pydantic.mypy"
-
-exclude = "tests"
-show_error_context = true
-pretty = true
-check_untyped_defs = true
-disallow_untyped_defs = true
-no_implicit_optional = true
-strict_optional = true
-strict_equality = true
-extra_checks = true
-warn_redundant_casts = true
-warn_unused_configs = true
-warn_unused_ignores = true
-warn_return_any = true
-show_error_codes = true
-
-[[tool.mypy.overrides]]
-ignore_missing_imports = true
-module = [
-    "cv2.*",
-    "pymupdf.*",
-]
+[tool.ruff.lint]
+# Defaults (pyflakes F + pycodestyle errors) — F401 keeps imports honest.
+select = ["E4", "E7", "E9", "F"]

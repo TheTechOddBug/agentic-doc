@@ -1,427 +1,282 @@
-### DEPRECATION WARNING
+# ade-cli
 
-⚠️⚠️⚠️ The agentic-doc Python library is now legacy. Please migrate to the new [landingai-ade library](https://github.com/landing-ai/ade-python), which is now the official Python library for Agentic Document Extraction and supports our newer API endpoints.
+> **This repository was [`agentic-doc`](https://github.com/landing-ai/ade-cli/tree/legacy)** — the original Agentic Document Extraction SDK. The SDK is preserved unchanged on the [`legacy`](https://github.com/landing-ai/ade-cli/tree/legacy) branch; library users should use [`landingai-ade`](https://pypi.org/project/landingai-ade/). This repo now ships **ade-cli**, the official ADE command line.
 
-<div align="center">
+[![Release](https://img.shields.io/github/v/release/landing-ai/ade-cli)](https://github.com/landing-ai/ade-cli/releases)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-# Agentic Document Extraction – Python Library
+**Agentic Document Extraction (ADE), from your terminal.** The `ade` command drives
+LandingAI's ADE v2 document APIs — `parse` turns visually complex documents
+(tables, figures, charts) into grounded markdown and elements; `extract` pulls
+schema-shaped fields with page-and-box evidence — and persists everything it
+produces in a local store (`~/.ade`), serving every read from it.
 
-[![Unit test status](https://github.com/landing-ai/agentic-doc/actions/workflows/ci-unit.yml/badge.svg)](https://github.com/landing-ai/agentic-doc/actions/workflows/ci-unit.yml)
-[![Integration test status](https://github.com/landing-ai/agentic-doc/actions/workflows/ci-integ.yml/badge.svg)](https://github.com/landing-ai/agentic-doc/actions/workflows/ci-integ.yml)
-[![](https://dcbadge.vercel.app/api/server/wPdN8RCYew?compact=true&style=flat)](https://discord.gg/RVcW3j9RgR)
-[![PyPI version](https://badge.fury.io/py/agentic-doc.svg)](https://badge.fury.io/py/agentic-doc)
+**[Documentation](https://docs.landing.ai/)** ·
+**[Playground](https://ade.landing.ai)** ·
+**[Get an API key](https://ade.landing.ai/settings/api-key)**
 
-**[Web App](https://va.landing.ai/demo/doc-extraction) · [Discord](https://discord.com/invite/RVcW3j9RgR) · [Blog](https://landing.ai/blog/going-beyond-ocrllm-introducing-agentic-document-extraction) · [Docs](https://support.landing.ai/docs/document-extraction)**
+## Install
 
-</div>
+Each release ships self-contained binaries for macOS, Linux, and Windows
+(arm64 and x86_64 each) — no Python, no `uv`. The installers detect your
+platform, verify the checksum, and put `ade` on your machine:
 
-## Overview
+**macOS / Linux**
 
-The LandingAI **Agentic Document Extraction** API pulls structured data out of visually complex documents—think tables, pictures, and charts—and returns a hierarchical JSON with exact element locations.
-
-This Python library wraps that API to provide:
-
-* **Long‑document support** – process 100+ page PDFs in a single call
-* **Auto‑retry / paging** – handles concurrency, time‑outs, and rate limits
-* **Helper utilities** – bounding‑box snippets, visual debuggers, and more
-
-### Features
-
-- 📦 **Batteries‑included install:** `pip install agentic-doc` – nothing else needed → see [Installation](#installation)
-- 🗂️ **All file types:** parse PDFs of *any* length, single images, or URLs → see [Supported Files](#supported-files)
-- 📚 **Long‑doc ready:** auto‑split & parallel‑process 1000+ page PDFs, then stitch results → see [Parse Large PDF Files](#parse-large-pdf-files)
-- 🧩 **Structured output:** returns hierarchical JSON plus ready‑to‑render Markdown → see [Result Schema](#result-schema)
-- 👁️ **Ground‑truth visuals:** optional bounding‑box snippets and full‑page visualizations → see [Save Groundings as Images](#save-groundings-as-images)
-- 🏃 **Batch & parallel:** feed a list; library manages threads & rate limits (`BATCH_SIZE`, `MAX_WORKERS`) → see [Parse Multiple Files in a Batch](#parse-multiple-files-in-a-batch)
-- 🔄 **Resilient:** exponential‑backoff retries for 408/429/502/503/504 and rate‑limit hits → see [Automatically Handle API Errors and Rate Limits with Retries](#automatically-handle-api-errors-and-rate-limits-with-retries)
-- ⚙️ **Config via env / .env:** tweak parallelism, logging style, retry caps—no code changes → see [Configuration Options](#configuration-options)
-- 🌐 **Raw API ready:** advanced users can still hit the REST endpoint directly → see the [API Docs](https://support.landing.ai/docs/document-extraction)
-
-
-## Quick Start
-
-### Installation
-
-```bash
-pip install agentic-doc
+```sh
+curl -fsSL https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.sh | sh
 ```
 
-### Requirements
-- Python version 3.9, 3.10, 3.11 or 3.12
-- LandingAI agentic AI API key (get the key [here](https://va.landing.ai/settings/api-key))
+**Windows (PowerShell)**
 
-### Set the API Key as an Environment Variable
-After you get the LandingAI agentic AI API key, set the key as an environment variable (or put it in a `.env` file):
-
-```bash
-export VISION_AGENT_API_KEY=<your-api-key>
+```powershell
+irm https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.ps1 | iex
 ```
 
-### Supported Files
-The library can extract data from:
-- PDFs (any length)
-- Images that are supported by OpenCV-Python (i.e. the `cv2` library)
-- URLs pointing to PDF or image files
+**Windows (CMD)**
 
-### Basic Usage
-
-#### Extract Data from One Document
-Run the following script to extract data from one document and return the results in both markdown and structured chunks.
-
-```python
-from agentic_doc.parse import parse
-
-# Parse a local file
-result = parse("path/to/image.png")
-print(result[0].markdown)  # Get the extracted data as markdown
-print(result[0].chunks)  # Get the extracted data as structured chunks of content
-
-# Parse a document from a URL
-result = parse("https://example.com/document.pdf")
-print(result[0].markdown)
-
-#### Extract Data from Multiple Documents
-Run the following script to extract data from multiple documents.
-
-```python
-from agentic_doc.parse import parse
-
-# Parse multiple local files
-file_paths = ["path/to/your/document1.pdf", "path/to/another/document2.pdf"]
-results = parse(file_paths)
-for result in results:
-    print(result.markdown)
-
-# Parse and save results to a directory
-results = parse(file_paths, result_save_dir="path/to/save/results")
-result_paths = []
-for result in results:
-    result_paths.append(result.result_path)
-# result_paths: ["path/to/save/results/document1_20250313_070305.json", ...]
+```bat
+curl -fsSL https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
+The app lands in `~/.ade/bin` (`%USERPROFILE%\.ade\bin` on Windows) — the
+binary plus an `_internal/` dir with its bundled libraries — inside the
+CLI's own home, next to the store; `ADE_HOME` moves both. The installer
+also symlinks `ade` into `~/.local/bin` (creating it if needed — it's on
+PATH in most setups, so no rc-file edit is needed) and verifies the link
+runs; it never overwrites a real file at that name. Scripting `ade`? See
+[Agents](#agents): a non-interactive shell sources no rc file, so use the
+absolute path `~/.ade/bin/ade`. Pin a version with `ADE_CLI_VERSION=0.2.1`, change
+the destination with `ADE_CLI_INSTALL_DIR`. To uninstall, remove
+`~/.ade/bin` and the `~/.local/bin/ade` symlink — never
+`rm -rf ~/.ade`, since the rest of that directory is your local store of
+billed parse/extract results.
+(Developing or installing from source? See
+[CONTRIBUTING.md](CONTRIBUTING.md).)
 
-#### Using field extraction
+## Auth
 
-```python
-from pydantic import BaseModel, Field
-from agentic_doc.parse import parse
+| command | what it does |
+|---|---|
+| `ade auth login` | prompt for an API key (hidden input) |
+| `ade auth login --api-key KEY` | store an API key for production directly |
+| `ade auth login --api-key -` | prompt for the key (hidden input) |
+| `echo $KEY \| ade auth login` | headless: a piped key is the prompt, answered |
+| `ade auth login --env eu` | log in to the EU region (no-op if it already holds a credential) |
+| `ade auth status` | the resolved target + every other environment holding a credential |
+| `ade auth logout` | log out of the resolved target |
+| `ade auth logout --env eu` | log out of a specific environment |
+| `ade auth logout --all` | log out of every environment |
+| `ade login` | top-level alias of `ade auth login` — same flags, same behavior |
+| `ade logout` | top-level alias of `ade auth logout` — same flags, same behavior |
 
-class ExtractedFields(BaseModel):
-    employee_name: str = Field(description="the full name of the employee")
-    employee_ssn: str = Field(description="the social security number of the employee")
-    gross_pay: float = Field(description="the gross pay of the employee")
-    employee_address: str = Field(description="the address of the employee")
+API keys come from your
+[LandingAI account settings](https://ade.landing.ai/settings/api-key).
+`login` verifies the key against the target environment before storing
+it — a mistyped key fails right at login, not at your first `parse`.
 
-results = parse("mydoc.pdf", extraction_model=ExtractedFields)
-fields = results[0].extraction
-metadata = results[0].extraction_metadata
-print(f"Field value: {fields.employee_name}, confidence: {metadata.employee_name.confidence}")
+**There is no "current environment" — the target is resolved fresh on every
+command**: the `--env` flag, else the `ADE_ENV` variable, else `production`.
+`export ADE_ENV=eu` gives one shell sticky EU while another shell works
+production; nothing global changes, and `parse`/`extract`/`auth` all
+follow the same rule, so a login and the verb after it can never disagree.
+Credentials are stored per environment, because ADE credentials don't cross
+environments:
+
+| `--env` / `ADE_ENV` | endpoint |
+|---|---|
+| `production` (default) | `https://api.ade.landing.ai` |
+| `eu` | `https://api.ade.eu-west-1.landing.ai` |
+
+`login` ensures the target is authenticated: with a stored credential it says
+so and does nothing; otherwise it acquires one (menu on a terminal). To force
+a fresh login, `logout --env X` first. Each environment's results are
+separate job items too — the environment is part of the job item id, so an
+EU parse never masquerades as a production one.
+
+`ADE_ENDPOINT` is the raw-URL escape hatch: it overrides the endpoint only,
+while credentials still file under the resolved environment. `ADE_API_KEY`
+overrides whatever credential is stored. Keys are stored per environment
+in `~/.ade/credentials.json` (mode 0600).
+Every command supports `--json` for one stable JSON object on stdout.
+
+**Headless setup never needs a terminal.** Where there is nothing to prompt
+on — CI, cron, an agent harness, a wrapped shell — set `ADE_API_KEY`, or
+pipe the key in: `echo $KEY | ade auth login` stores it for the resolved
+environment exactly as the prompt would. (`--api-key KEY` works too, but an
+inline key is visible to `ps`.) Nothing hangs waiting on an idle stdin: with
+no key available the command exits immediately, naming all three paths.
+`ade help credentials` is the same page from the CLI.
+
+## Parse
+
+| command | what it does |
+|---|---|
+| `ade parse -d invoice.pdf` | ensure parsed; artifacts land in `~/.ade` |
+| `ade parse --document-url https://…/doc.pdf` | server fetches the URL |
+| `ade parse -d doc.pdf --tier standard --wait 0` | cheap lane, submit-and-return |
+| `ade parse -d doc.pdf --env eu` | run in the EU region (or `export ADE_ENV=eu`) |
+| `ade parse -d doc.pdf --include markdown --json` | carry the markdown in the payload |
+| `JOB=$(ade parse -d doc.pdf --id-only)` | just the job item id, for piping |
+
+Every run is a **job item** — keyed by the invocation, `verb × environment ×
+source path × content × params` — one flat folder under
+`~/.ade/jobs/<job-item-id>/`:
+`parse.json` (raw response), `parse.md` (markdown with its doc_id trailer),
+`elements.json` (flat elements projection, recomputable from `parse.json`),
+`meta.json` (provenance + params + identity), `job.json` (claim ticket).
+`parse` is a guarantee: re-running the exact same invocation is served from
+disk with zero API calls (`--force` re-parses in place); changed params —
+or a moved/edited file — mint a *sibling* job item, so variants coexist and
+nothing is silently replaced; a pending job is resumed, never resubmitted;
+Ctrl-C stops the waiting, not the work — the same command resumes.
+Exit codes: `0` parsed, `1` failed, `2` usage, `3` still pending (re-run the
+same command to resume), `4` rate-limited before submit.
+`--json` carries the summary; `--include markdown` / `--include elements`
+add the bulk artifacts to it, so a script never has to reach into the store
+for them. `--id-only` prints just the job item id — the piping spelling:
+
+```sh
+JOB=$(ade parse -d doc.pdf --wait 0 --id-only)   # submit and return, exit 3
+ade parse -d doc.pdf --id-only                    # re-run to resume; same id
 ```
 
+## Extract
 
-#### Extract Data Using Connectors
-The library now supports various connectors to easily access documents from different sources:
+| command | what it does |
+|---|---|
+| `ade extract JOB_ID --schema schema.json` | extract a completed parse job item |
+| `ade extract -d invoice.pdf --schema '…'` | by path: reuse the latest parse, else parse first |
+| `ade extract --markdown notes.md --schema '…'` | bring-your-own markdown |
+| `ade extract --markdown-url https://…/notes.md --schema schema.json` | bring-your-own markdown, fetched by the server |
 
-##### Google Drive Connector
+Every extraction is its own top-level job item. Given a parse job item id,
+the extract item *references* the parse (`parse/ref.json`) — artifacts are
+never copied — and **inherits the parse item's environment** (its
+server-side parse job exists nowhere else; a conflicting `--env` is
+refused). Given a document path, the latest completed parse of that
+path+content in the target environment is reused (logged, referenced like
+the id form); if none
+exists the CLI **runs a standalone parse job first** — a normal top-level
+parse item, exactly as if you had run `parse -d` — then the extract
+referencing it, both bills itemised in one summary. Every parse the CLI
+runs is reusable, so repeated `extract -d` on a never-parsed document
+bills the parse exactly once. Bring-your-own markdown is copied in as
+`markdown.md` (spans index exactly those bytes); it has no parse edge, so
+evidence degrades to spans-only.
 
-**Prerequisites: Follow the [Google Drive API Python Quickstart](https://developers.google.com/workspace/drive/api/quickstart/python) tutorial first to set up your credentials.**
+The extraction itself is on stdout: `--json` carries the schema-shaped
+result under `extraction`, alongside the per-field `evidence` join —
+reading `extract.json` out of the store is a convenience, never a
+requirement.
 
-The Google Drive API quickstart will guide you through:
-1. Creating a Google Cloud project
-2. Enabling the Google Drive API
-3. Setting up OAuth 2.0 credentials
-
-After completing the quickstart tutorial, you can use the Google Drive connector as follows:
-
-```python
-from agentic_doc.parse import parse
-from agentic_doc.connectors import GoogleDriveConnectorConfig
-
-# Using OAuth credentials file (from quickstart tutorial)
-config = GoogleDriveConnectorConfig(
-    client_secret_file="path/to/credentials.json",
-    folder_id="your-google-drive-folder-id"  # Optional
-)
-
-# Parse all documents in the folder
-results = parse(config)
-
-# Parse with filtering
-results = parse(config, connector_pattern="*.pdf")
+```sh
+ade extract $JOB --schema schema.json --json | jq .extraction
 ```
 
-##### Amazon S3 Connector
-```python
-from agentic_doc.parse import parse
-from agentic_doc.connectors import S3ConnectorConfig
+## View
+
+| command | what it does |
+|---|---|
+| `ade view` | the latest *viewable* job item's HTML viewer (opens in your browser on a terminal) |
+| `ade view JOB_ID` | a specific job item (id or unambiguous prefix) |
+| `ade view JOB_ID --element-id ELEMENT_ID` | deep link straight to one element |
+| `ade crop JOB_ID --element-id ELEMENT_ID` | PNG of just that element's region |
+| `ade crop JOB_ID --type figure` | PNG of every figure — one command, no loop |
+| `ade crop JOB_ID --all -o ./crops` | every element, into a directory you pick |
+
+On a terminal, `view` opens the viewer in your browser by default
+(`--no-open` suppresses it); `--json` runs and piped output never
+launch a browser — the artifact path is in the output either way.
+Without a JOB_ID, `view` targets the latest viewable job item.
+
+Every job item gets a **self-contained `view.html`**: page images with
+bounding-box overlays beside the parsed markdown (or extraction JSON),
+selection synced across both panes, and a history sidebar for jumping
+between items. Deep links are the citation contract — `--element-id`
+emits `view.html#element=…`, which opens with that element selected on
+both sides. `crop` cuts element regions straight out of the source
+document (`--dpi`, default 300) — visual evidence for an answer, one
+command. Address one element with `--element-id` (ids from `ade find`),
+or crop in batch with the very same filters `find` searches by:
+`--type figure`, `--page 3`, `--all`. A batch writes one PNG per element
+into the job item's `crops/` (or a directory you name with `-o`) and
+returns them as `crops[]`; a single `--element-id` returns the one crop
+flat. Everything renders from the
+local store: zero API calls, rebuilds fingerprint-gated. Long documents
+stay browsable end to end — the artifact embeds the first 40 pages and
+loads the rest on demand from sidecar files rendered into the store.
+
+## History
+
+| command | what it does |
+|---|---|
+| `ade history` | defaults to `ade history list` |
+| `ade history list` | one row per job item: id, kind, state, params, source |
+| `ade history list --json` | full records (params verbatim, timestamps, linkage) |
+| `ade history clear JOB_ID` | delete an item; clearing a parse cascades to its extracts |
+| `ade history clear --all` | delete every stored job item |
+
+The read model over the store — zero API calls; states derive from tickets
+and artifacts on disk. Extract items referencing a parse render as indented
+child rows beneath it. Every `history`/`view` run re-scans `jobs/` and
+rewrites `~/.ade/history.js` (the viewer sidebar's read model), so manually
+deleted folders simply vanish from listings.
+
+Commands that read the store (`view`, `crop`, `find`, `history clear`,
+`extract JOB_ID`) take a **job item id or an unambiguous prefix** — paths
+are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
+`ade history list` when you have a path and need an id.
+
+## Find
+
+| command | what it does |
+|---|---|
+| `ade find JOB_ID "total"` | case-insensitive substring |
+| `ade find --job ITEM_A --job ITEM_B --json "€42"` | multi-item (`--job`, repeatable), tagged by `job_item_id` |
+| `ade find JOB_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
+| `ade find JOB_ID --page 1 --limit 5` | no query = every element |
+
+Pure local search over a parse job item's elements projection — zero API
+calls, no ranking. All filters compose (AND): QUERY (substring, or a regex
+with `--regex`), `--type`, `--page`, `--element-id` (repeatable), `--limit`.
+Matches are the citation currency, one record per element in document order
+(page, then reading order): `{job_item_id, element_id, type, page, box, text}`.
+`--id-only` prints the element ids alone, one per line, for piping into
+anything that takes them — though `crop` accepts these same filters
+directly, so cropping a selection needs no bridge.
+
+## Help topics
+
+`ade help` is the whole-surface reference in one call. It also carries the
+conceptual pages a per-command `--help` has nowhere to put:
+
+| topic | what it explains |
+|---|---|
+| `ade help workflow` | how the verbs compose — the pipeline, before your first run |
+| `ade help output` | `--json`, `--id-only`, and where results live |
+| `ade help credentials` | environment resolution and headless setup |
+| `ade help errors` | exit states and the error payload shape |
+
+`ade help COMMAND` scopes the reference to one command — including the
+published shape of its `--json` result.
+
+## Agents
+
+Agents are first-class callers: every command takes `--json` and emits one
+stable JSON object whose shape is published per verb (`ade help --json`
+carries a `result` block for each), the full result is always on stdout —
+never only in a store file — `ade help --json` returns the entire shipped
+surface (commands, flags, result shapes, topics, exit states, store
+layout) in a single call, and [`SKILL.md`](SKILL.md) ships the agent
+contract: the loop, the conventions, and the sharp edges.
+
+Automating installs: the binary lands at `~/.ade/bin/ade`, and the
+installer ends by naming that absolute path. Non-interactive shells (CI,
+cron, agent harnesses) source no rc file, so a PATH entry your login shell
+has may not be there — call the absolute path, or export
+`PATH="$HOME/.ade/bin:$PATH"` in the job itself.
 
-config = S3ConnectorConfig(
-    bucket_name="your-bucket-name",
-    aws_access_key_id="your-access-key",  # Optional if using IAM roles
-    aws_secret_access_key="your-secret-key",  # Optional if using IAM roles
-    region_name="us-east-1"
-)
+## License
 
-# Parse all documents in the bucket
-results = parse(config)
-
-# Parse documents in a specific prefix/folder
-results = parse(config, connector_path="documents/")
-```
-
-##### Local Directory Connector
-```python
-from agentic_doc.parse import parse
-from agentic_doc.connectors import LocalConnectorConfig
-
-config = LocalConnectorConfig()
-
-# Parse all supported documents in a directory
-results = parse(config, connector_path="/path/to/documents")
-
-# Parse with pattern filtering
-results = parse(config, connector_path="/path/to/documents", connector_pattern="*.pdf")
-
-# Parse all supported documents in a directory recursively (search subdirectories as well)
-config = LocalConnectorConfig(recursive=True)
-results = parse(config, connector_path="/path/to/documents")
-```
-
-##### URL Connector
-```python
-from agentic_doc.parse import parse
-from agentic_doc.connectors import URLConnectorConfig
-
-config = URLConnectorConfig(
-    headers={"Authorization": "Bearer your-token"},  # Optional
-    timeout=60  # Optional
-)
-
-# Parse document from URL
-results = parse(config, connector_path="https://example.com/document.pdf")
-```
-
-#### Raw Bytes Input
-
-```python
-from agentic_doc.parse import parse
-
-# Load a PDF or image file as bytes
-with open("document.pdf", "rb") as f:
-    raw_bytes = f.read()
-
-# Parse the document from bytes
-results = parse(raw_bytes)
-```
-
-You can also parse image bytes:
-
-```python
-with open("image.png", "rb") as f:
-    image_bytes = f.read()
-
-results = parse(image_bytes)
-```
-
-This is useful when documents are already loaded into memory (e.g., from an API response or uploaded via a web interface). The parser will auto-detect the file type from the bytes.
-
-
-## Why Use It?
-
-- **Simplified Setup:** No need to manage API keys or handle low-level REST calls.
-- **Automatic Large File Processing:** Splits large PDFs into manageable parts and processes them in parallel.
-- **Built-In Error Handling:** Automatically retries requests with exponential backoff and jitter for common HTTP errors.
-- **Parallel Processing:** Efficiently parse multiple documents at once with configurable parallelism.
-
-## Main Features
-
-With this library, you can do things that are otherwise hard to do with the Agentic Document Extraction API alone.
-This section describes some of the key features this library offers.
-
-### Parse Large PDF Files
-
-**A single REST API call can only handle up to certain amount of pages at a time** (see [rate limits](https://docs.landing.ai/ade/ade-rate-limits#maximum-pages-per-document)). This library automatically splits a large PDF into multiple calls, uses a thread pool to process the calls in parallel, and stitches the results back together as a single result.
-
-We've used this library to successfully parse PDFs that are 1000+ pages long.
-
-### Parse Multiple Files in a Batch
-
-You can parse multiple files in a single function call with this library. The library processes files in parallel.
-
-> **NOTE:** You can change the parallelism by setting the `batch_size` setting.
-
-### Save Groundings as Images
-
-The library can extract and save the visual regions (groundings) of the document where each chunk of content was found. This is useful for visualizing exactly what parts of the document were extracted and for debugging extraction issues.
-
-Each grounding represents a bounding box in the original document, and the library can save these regions as individual PNG images. The images are organized by page number and chunk ID.
-
-Here's how to use this feature:
-
-```python
-from agentic_doc.parse import parse
-
-# Parse a document from a URL & save groundings
-results = parse(["https://www.rbcroyalbank.com/banking-services/_assets-custom/pdf/eStatement.pdf"],
-                grounding_save_dir="./grounding")
-
-
-# Print the path to each saved grounding
-for chunk in results[0].chunks:
-    for grounding in chunk.grounding:
-        if grounding.image_path:
-            print(f"Grounding saved to: {grounding.image_path}")
-```
-
-
-### Visualize Parsing Results
-
-The library provides a visualization utility that creates annotated images showing where each chunk of content was extracted from the document. This is useful for:
-- Verifying the accuracy of the extraction
-- Debugging extraction issues
-
-Here's how to use the visualization feature:
-
-```python
-from agentic_doc.parse import parse
-from agentic_doc.utils import viz_parsed_document
-from agentic_doc.config import VisualizationConfig
-
-# Parse a document
-results = parse("path/to/document.pdf")
-parsed_doc = results[0]
-
-# Create visualizations with default settings
-# The output images have a PIL.Image.Image type
-images = viz_parsed_document(
-    "path/to/document.pdf",
-    parsed_doc,
-    output_dir="path/to/save/visualizations"
-)
-
-# Or customize the visualization appearance
-viz_config = VisualizationConfig(
-    thickness=2,  # Thicker bounding boxes
-    text_bg_opacity=0.8,  # More opaque text background
-    font_scale=0.7,  # Larger text
-    # Custom colors for different chunk types
-    color_map={
-        ChunkType.TITLE: (0, 0, 255),  # Red for titles
-        ChunkType.TEXT: (255, 0, 0),  # Blue for regular text
-        # ... other chunk types ...
-    }
-)
-
-images = viz_parsed_document(
-    "path/to/document.pdf",
-    parsed_doc,
-    output_dir="path/to/save/visualizations",
-    viz_config=viz_config
-)
-
-# The visualization images will be saved as:
-# path/to/save/visualizations/document_viz_page_X.png
-# Where X is the page number
-```
-
-The visualization shows:
-- Bounding boxes around each extracted chunk
-- Chunk type and index labels
-- Different colors for different types of content (titles, text, tables, etc.)
-- Semi-transparent text backgrounds for better readability
-
-### Automatically Handle API Errors and Rate Limits with Retries
-
-The REST API endpoint imposes rate limits per API key. This library automatically handles the rate limit error or other intermittent HTTP errors with retries.
-
-For more information, see [Error Handling](#error-handling) and [Configuration Options](#configuration-options).
-
-### Error Handling
-
-This library implements a retry mechanism for handling API failures:
-
-- Retries are performed for these HTTP status codes: 408, 429, 502, 503, 504.
-- Exponential backoff with jitter is used for retry wait time.
-- The initial retry wait time is 1 second, which increases exponentially.
-- Retry will stop after `max_retries` attempts. Exceeding the limit raises an exception and results in a failure for this request.
-- Retry wait time is capped at `max_retry_wait_time` seconds.
-- Retries include a random jitter of up to 10 seconds to distribute requests and prevent the thundering herd problem.
-
-### Parsing Errors
-
-If the REST API request encounters an unrecoverable error during parsing (either from client-side or server-side), the library includes an [errors](./agentic_doc/common.py#L75) field in the final result for the affected page(s).
-Each error contains the error message, error_code and corresponding page number.
-
-## Configuration Options
-
-The library uses a [`Settings`](./agentic_doc/config.py) object to manage configuration. You can customize these settings either through environment variables or a `.env` file:
-
-Below is an example `.env` file that customizes the configurations:
-
-```bash
-# Number of files to process in parallel, defaults to 4
-BATCH_SIZE=4
-# Number of threads used to process parts of each file in parallel, defaults to 5.
-MAX_WORKERS=2
-# Maximum number of retry attempts for failed intermittent requests, defaults to 100
-MAX_RETRIES=80
-# Maximum wait time in seconds for each retry, defaults to 60
-MAX_RETRY_WAIT_TIME=30
-# Logging style for retry, defaults to log_msg
-RETRY_LOGGING_STYLE=log_msg
-```
-
-### Max Parallelism
-
-The maximum number of parallel requests is determined by multiplying `BATCH_SIZE` × `MAX_WORKERS`.
-
-> **NOTE:** The maximum parallelism allowed by this library is 100.
-
-Specifically, increasing `MAX_WORKERS` can speed up the processing of large individual files, while increasing `BATCH_SIZE` improves throughput when processing multiple files.
-
-> **NOTE:** Your job's maximum processing throughput may be limited by your API rate limit. If your rate limit isn't high enough, you may encounter rate limit errors, which the library will automatically handle through retries.
-
-The optimal values for `MAX_WORKERS` and `BATCH_SIZE` depend on your API rate limit and the latency of each REST API call. For example, if your account has a rate limit of 5 requests per minute, and each REST API call takes approximately 60 seconds to complete, and you're processing a single large file, then `MAX_WORKERS` should be set to 5 and `BATCH_SIZE` to 1.
-
-You can find your REST API latency in the logs. If you want to increase your rate limit, schedule a time to meet with us [here](https://scheduler.zoom.us/d/56i81uc2/landingai-document-extraction).
-
-### Set `RETRY_LOGGING_STYLE`
-
-The `RETRY_LOGGING_STYLE` setting controls how the library logs the retry attempts.
-
-- `log_msg`: Log the retry attempts as a log messages. Each attempt is logged as a separate message. This is the default setting.
-- `inline_block`: Print a yellow progress block ('█') on the same line. Each block represents one retry attempt. Choose this if you don't want to see the verbose retry logging message and still want to track the number of retries that have been made.
-- `none`: Do not log the retry attempts.
-
-
-## Troubleshooting & FAQ
-
-### Common Issues
-- **API Key Errors:**
-  Ensure your API key is correctly set as an environment variable.
-- **Rate Limits:**
-  The library automatically retries requests if you hit the API rate limit. Adjust `BATCH_SIZE` or `MAX_WORKERS` if you encounter frequent rate limit errors.
-- **Parsing Failures:**
-  If a document fails to parse, an error chunk will be included in the result, detailing the error message and page index.
-- **URL Access Issues:**
-  If you're having trouble accessing documents from URLs, check that the URLs are publicly accessible and point to supported file types (PDF or images).
-
-### Note on `include_marginalia` and `include_metadata_in_markdown`
-
-- `include_marginalia`: If True, the parser will attempt to extract and include marginalia (footer notes, page number, etc.) from the document in the output.
-- `include_metadata_in_markdown`: If True, the output markdown will include metadata.
-
-Both parameters default to True. You can set them to False to exclude these elements from the output.
-
-#### Example: Using the new parameters
-
-```python
-from agentic_doc.parse import parse
-
-results = parse(
-    "path/to/document.pdf",
-    include_marginalia=False,  # Exclude marginalia from output
-    include_metadata_in_markdown=False  # Exclude metadata from markdown
-)
-```
+[Apache-2.0](LICENSE).

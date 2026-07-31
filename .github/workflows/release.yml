@@ -1,127 +1,217 @@
-name: Release Branch CI/CD
+# Binary releases. pyproject.toml is the version source of truth; either
+# entry builds a standalone PyInstaller binary per platform, smoke-tests
+# it, and publishes a GitHub release with archives + SHA256SUMS + the
+# install scripts:
+#   - push the tag `v<version>` (local flow), or
+#   - Actions -> Release -> "Run workflow" on main (no clone needed): the
+#     workflow tags v<pyproject version> itself. The tagging must live in
+#     here — a tag pushed with GITHUB_TOKEN never triggers workflows.
+# Contract-tested by tests/test_release_pipeline.py.
+name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
 
-env:
-  VISION_AGENT_API_KEY: "PLACEHOLDER"
-  PYTHONUTF8: 1
+permissions:
+  contents: write
 
 jobs:
-  unit_test:
-    name: Test
-    strategy:
-      matrix:
-        python-version: [3.9, 3.13]
-        os: [ubuntu-22.04, windows-2022, macos-14]
-    runs-on: ${{ matrix.os }}
-    env:
-      RUNTIME_TAG: ci_job
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install Python Poetry
-        uses: abatilo/actions-poetry@v2.1.0
-        with:
-          poetry-version: 1.4.2
-      - name: Configure poetry
-        shell: bash
-        run: poetry config virtualenvs.in-project true
-      - name: Print Python environment information
-        run: |
-          poetry env info
-          poetry --version
-          poetry run pip -V
-      - name: Install dependencies
-        run: |
-          poetry install --all-extras
-      - name: Linting
-        run: |
-          poetry run flake8 . --exclude .venv,examples,tests --count --show-source --statistics
-      - name: Check Format
-        run: |
-          poetry run black --check --diff --color agentic_doc/
-      - name: Type Checking
-        run: |
-          poetry run mypy agentic_doc
-      - name: Test with pytest
-        run: |
-          poetry run pytest -s -vvv tests/unit
-
-  integ_test:
-    name: Integ Test
+  check:
     runs-on: ubuntu-latest
-    env:
-      RUNTIME_TAG: ci_job
-      VISION_AGENT_API_KEY: ${{ secrets.VISION_AGENT_API_KEY }}
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+
+      - name: Read version from pyproject.toml
+        id: version
+        run: |
+          version="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Tag must match pyproject.toml version (tag push)
+        if: github.event_name == 'push'
+        run: |
+          if [ "${{ steps.version.outputs.tag }}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${{ steps.version.outputs.tag }}"
+            exit 1
+          fi
+
+      - name: Create the release tag (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if [ "${GITHUB_REF_NAME}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo "::error::dispatch releases only from ${{ github.event.repository.default_branch }} (got ${GITHUB_REF_NAME})"
+            exit 1
+          fi
+          if git ls-remote --exit-code origin "refs/tags/${tag}" > /dev/null 2>&1; then
+            echo "::error::${tag} already exists — bump the version in pyproject.toml first"
+            exit 1
+          fi
+          git tag "${tag}"
+          git push origin "${tag}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: 3.12
-      - name: Install Python Poetry
-        uses: abatilo/actions-poetry@v2.1.0
+          python-version: "3.13" # same interpreter the build jobs freeze
+
+      - name: Run tests
+        run: |
+          uv sync --locked
+          uv run pytest -q
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-14
+          - target: darwin-x86_64
+            runner: macos-15-intel
+          # Linux builds on 22.04 on purpose: PyInstaller binaries require
+          # the build host's glibc or newer, so older images reach more
+          # distros (22.04 = glibc 2.35).
+          - target: linux-x86_64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: windows-x86_64
+            runner: windows-2025
+          - target: windows-arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          poetry-version: 1.4.2
-      - name: Configure poetry
-        shell: bash
-        run: poetry config virtualenvs.in-project true
-      - name: Print Python environment information
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --locked --group release
+
+      # The app/binary is `ade`; the distribution stays the ade-cli package.
+      # --copy-metadata keeps `ade version` (importlib.metadata) working
+      # in the frozen app; --collect-all pypdfium2_raw carries the pdfium
+      # shared library; --collect-data ade_cli bundles the package's HTML
+      # templates read via importlib.resources (issue #91). --onedir, never
+      # single-file mode: a onefile binary re-extracts ~100 shared libraries
+      # to fresh inodes on every launch, and macOS re-validates every code
+      # signature each time (~10s per command, issue #83). The onedir app
+      # pays that once per install.
+      - name: Build binary
+        run: >
+          uv run pyinstaller --onedir --name ade
+          --copy-metadata ade-cli
+          --collect-all pypdfium2 --collect-all pypdfium2_raw
+          --collect-data ade_cli
+          --workpath build --specpath build --noconfirm
+          packaging/pyinstaller_entry.py
+
+      # `history clear --all` takes the store lock, so the smoke test also
+      # proves the platform's file-locking branch works in the frozen app.
+      # The template checks guard the importlib.resources data files that
+      # `version`/`--help` never touch (issue #91). The parse submit drives
+      # the request path `version`/`--help` never reach: 0.1.3 crashed
+      # there building the User-Agent from a dependency's dist-info, which
+      # the frozen app doesn't bundle (issue #97) — the local server's 501
+      # must come back as ade-cli's structured HTTP error, not a
+      # frozen-app traceback.
+      - name: Smoke test (unix)
+        if: runner.os != 'Windows'
+        env:
+          ADE_HOME: ${{ runner.temp }}/ade-smoke
         run: |
-          poetry env info
-          poetry --version
-          poetry run pip -V
-      - name: Install dependencies
+          ./dist/ade/ade version
+          ./dist/ade/ade --help > /dev/null
+          ./dist/ade/ade history clear --all --json
+          test -f dist/ade/_internal/ade_cli/view_template.html
+          test -f dist/ade/_internal/ade_cli/crop_template.html
+          test -f dist/ade/_internal/ade_cli/auth_callback.html
+          python3 -m http.server 8619 --bind 127.0.0.1 > /dev/null 2>&1 &
+          server_pid=$!
+          for _ in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:8619/ > /dev/null 2>&1 && break
+            sleep 0.25
+          done
+          printf '%%PDF-1.4 smoke' > "${RUNNER_TEMP}/smoke.pdf"
+          out=$(ADE_ENDPOINT=http://127.0.0.1:8619 ADE_API_KEY=sk-smoke \
+            ./dist/ade/ade parse -d "${RUNNER_TEMP}/smoke.pdf" --json || true)
+          kill "$server_pid"
+          echo "$out" | grep -q '"status_code": 501'
+
+      - name: Smoke test (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ADE_HOME: ${{ runner.temp }}\ade-smoke
         run: |
-          poetry install --all-extras
-      - name: Integ Test with pytest
-        run: |
-          poetry run pytest -n auto -s -vvv tests/integ
+          .\dist\ade\ade.exe version
+          .\dist\ade\ade.exe --help | Out-Null
+          .\dist\ade\ade.exe history clear --all --json
+          foreach ($f in 'view_template.html', 'crop_template.html', 'auth_callback.html') {
+            if (-not (Test-Path "dist\ade\_internal\ade_cli\$f")) { throw "missing $f" }
+          }
+          $server = Start-Process uv -ArgumentList 'run', 'python', '-m', 'http.server', '8619', '--bind', '127.0.0.1' -PassThru -WindowStyle Hidden
+          foreach ($i in 1..40) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8619/ | Out-Null; break }
+            catch { Start-Sleep -Milliseconds 250 }
+          }
+          Set-Content -NoNewline -Path "$env:RUNNER_TEMP\smoke.pdf" -Value '%PDF-1.4 smoke'
+          $env:ADE_ENDPOINT = 'http://127.0.0.1:8619'
+          $env:ADE_API_KEY = 'sk-smoke'
+          $out = .\dist\ade\ade.exe parse -d "$env:RUNNER_TEMP\smoke.pdf" --json | Out-String
+          Stop-Process $server
+          if ($out -notmatch '"status_code": 501') { throw "parse submit did not fail cleanly: $out" }
+          exit 0
+
+      # Archives hold the onedir app directory: ade/ade(.exe) plus
+      # ade/_internal/ with the bundled libraries. Asset names keep the
+      # ade-cli- prefix — the installers address them by that scheme.
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: tar -czf "ade-cli-${{ matrix.target }}.tar.gz" -C dist ade
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist\ade -DestinationPath "ade-cli-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ade-cli-${{ matrix.target }}
+          path: ade-cli-${{ matrix.target }}.*
+          if-no-files-found: error
 
   release:
-    name: Release to PyPI
-    needs: [unit_test, integ_test]
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@v4
-        with:
-          python-version: 3.10.11
-      - name: Install Python Poetry
-        uses: abatilo/actions-poetry@v2.1.0
-        with:
-          poetry-version: 1.4.2
-      - name: Configure poetry
-        shell: bash
-        run: poetry config virtualenvs.in-project true
-      - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GH_TOKEN }}
-      - name: setup git config
-        run: |
-          git config user.name "Landing AI Bot"
-          git config user.email "dev@landing.ai"
+      - uses: actions/checkout@v4
 
-      - name: Publish to PyPI
-        run: |
-          TAG=${{ github.ref_name }}
-          poetry version ${TAG#v}
-          poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
-          poetry publish --build -vvv
-
-      - name: Checkout main code to bump version
-        uses: actions/checkout@v3
+      - uses: actions/download-artifact@v4
         with:
-          ref: main
-          token: ${{ secrets.GH_TOKEN }}
+          path: assets
+          merge-multiple: true
 
-      - name: Bump up version on main
+      - name: Checksums
+        run: cd assets && sha256sum ade-cli-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      # The check job's computed tag, not GITHUB_REF_NAME: under manual
+      # dispatch the ref is the branch, not the tag being released.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
-          TAG=${{ github.ref_name }}
-          poetry version ${TAG#v}
-          new_version=`poetry version`
-          git add pyproject.toml
-          git commit -m "[skip ci] chore(release): ${new_version}" && git push -f || true
+          gh release create "$TAG" \
+            assets/* scripts/install.sh scripts/install.ps1 scripts/install.cmd \
+            --title "$TAG" \
+            --generate-notes

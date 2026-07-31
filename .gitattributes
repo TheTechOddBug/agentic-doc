@@ -1,0 +1,2 @@
+# cmd.exe requires CRLF (raw.githubusercontent serves the blob verbatim) — keep git from renormalizing it
+*.cmd -text

@@ -1,0 +1,2624 @@
+<!-- ade:view fingerprint=__FINGERPRINT__ -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ade view</title>
+<!--
+  Replica of the vision-agent-ui (VUI) DPT-3 project viewer, static and
+  self-contained. All "VUI <path>:<lines>" citations below reference repo
+  vision-agent-ui at commit 7be057957 (2026-07-15). Main sources:
+    header/pills:   apps/vision-agent/app/(protected)/[identity]/project/[projectId]/_components/ProjectHeader.tsx:327-433,578-717
+    pagination:     .../_components/HeaderPagination.tsx:18-60
+    split panes:    .../[projectId]/client.tsx:2427-2556 (Allotment 33% / min 300 / min 400)
+    sash style:     apps/vision-agent/app/globals.css:726-753
+    theme tokens:   apps/vision-agent/app/globals.css:89-215; packages/shared-ui-components/tailwind.config.ts:218-231
+    element colors: packages/shared-ui-components/doc-extraction-app/utils.ts:25-45
+    parse toolbar:  .../_components/ProjectParseTab.tsx:184,257-265,351-366,471-528,655-693
+    download:       packages/shared-ui-components/utils/codeUtils.ts:55-79
+    eye dropdown:   .../_components/DisplaySettingsDropdown.tsx:33,80-119 (+ atom default: doc-extraction-app/atom.ts:299)
+    markdown pane:  packages/shared-ui-components/doc-extraction-app/_components/parse/Dpt3ChunksMarkdown.tsx:169-206,337-532,553-577
+    dpt3 utils:     packages/shared-libs/utils/dpt3.ts:392-401,410-418,502-549,592-629,645-692
+    md pipeline:    packages/shared-ui-components/components/MemoizedReactMarkdown.tsx:35-42,193-218,265-270
+    page stack:     packages/shared-ui-components/doc-extraction-app/_components/media/MediaDisplay.tsx:703-786
+    box overlay:    .../_components/media/DocExtractionAnnotationsDpt3.tsx
+    json view:      .../_components/parse/Dpt3RawJsonView.tsx:106,289-292; components/MonacoEditor/ReadOnlyJsonView.tsx
+    extract links:  apps/vision-agent/lib/hooks/useGroundingMetadata.ts + dpt3.ts (mapDpt3ExtractionMetadataToChunkRefs)
+    icons/logo:     packages/shared-ui-components/ui/Icons.tsx; apps/vision-agent/assets/svg/new_logo_{icon,text}_light.svg
+  Known deviation: VUI keys table cells as `{tableId}-c{N}` (dpt3.ts:119-121);
+  this viewer keeps the wire element ids (`table_cell-N`) because they are the
+  CLI's citation currency (find / --element-id / deep links).
+-->
+<style>
+  /* Light-theme tokens, verbatim from VUI globals.css:89-215 and the
+     warm-green scale from tailwind.config.ts:218-231. */
+  :root {
+    --bg-main: #ffffff; --bg-raised: #ffffff;
+    --bg-subtlest: #fafaf7; --bg-subtle: #f6f6ef; --bg-highlight: #efefe5;
+    --bg-main-hovered: #f8fafc;
+    --text-primary: #1a1916; --text-secondary: #44423c;
+    --text-tertiary: #878682; --text-disabled: #a7b7cc;
+    --border-subtle: #e7e7d9;
+    --warm-green-300: #E7E7D9; --warm-green-400: #CED6C8;
+    --warm-green-500: #B0CDAE; --warm-green-700: #446648;
+    --focus-border: #039855; /* VUI globals.css:727 */
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg-main); color: var(--text-primary);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: row; overflow: hidden;
+  }
+  #appcol { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+
+  /* ── History sidebar — the store-level job-item nav (data: history.js).
+     Geometry/colors are 1:1 with Figma "CLI Viewer UI" node 46:1122
+     ("sidebar / documents", fetched via REST API 2026-07-21): 260px rail,
+     52px header (pad 16/12, gap 8; title Inter 600 14 #121519; 24px mark),
+     filter button 28px r6 — a deviation from the comp's 24px r4, 1:1 with
+     the search input height by request — with a corner count pill (Tag/
+     Filled/Small/Neutral: r999 #F6F6EF, Inter 500 10 #44423C), 44px search
+     row (input
+     28px r6, icons 16, text Inter 400 12), run-list pad 8 gap 2, rows
+     pad 4/6 r6 (selected #F6F6EF), tag pill pad 4/8 r20 Inter 500 10
+     #44423C, name Inter 500 12 #1A1916, 7px status dot (#446648 ok /
+     #D92D20 failed), meta Inter 500 11 #878682 (#D92D20 whole line when
+     failed). The design's sb-foot ("Upload document") is hidden in the
+     file and stays out here too. */
+  #histbar {
+    position: relative; display: flex; flex-direction: column;
+    width: 260px; flex-shrink: 0; height: 100%; overflow: hidden;
+    border-right: 1px solid var(--border-subtle); background: var(--bg-main);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    transition: width .3s ease-in-out; /* VUI GlobalSidebarV3: duration-300 */
+  }
+  #histbar[hidden] { display: none; }
+  .hb-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    height: 52px; flex-shrink: 0; padding: 0 12px 0 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .hb-title {
+    display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0;
+    font-size: 14px; font-weight: 600; line-height: 17px; color: #121519;
+  }
+  .hb-title svg { flex-shrink: 0; }
+  /* Deviation from the comp's 24px r4: 28x28 (1:1) so the button matches
+     the 28px search input height; the count pill moves to the corner. */
+  .hb-filterbtn {
+    position: relative; display: flex; width: 28px; height: 28px;
+    flex-shrink: 0; align-items: center; justify-content: center;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle); background: var(--bg-main);
+  }
+  .hb-filterbtn:hover { background: var(--bg-subtle); }
+  #hb-badge {
+    position: absolute; top: -5px; right: -5px; min-width: 16px;
+    padding: 2px 4px; border-radius: 999px; text-align: center;
+    background: var(--bg-subtle); color: var(--text-secondary);
+    font-size: 10px; line-height: 12px; font-weight: 500;
+    box-shadow: 0 0 0 1px var(--bg-main);
+  }
+  #hb-badge[hidden] { display: none; }
+  .hb-search {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; padding: 6px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .hb-search-box { position: relative; flex: 1; min-width: 0; }
+  .hb-search-box input {
+    width: 100%; height: 28px; border: 1px solid var(--border-subtle); border-radius: 6px;
+    background: var(--bg-main); padding: 6px 32px; font: inherit;
+    font-size: 12px; font-weight: 400; line-height: 16px;
+    color: var(--text-primary); outline: none;
+  }
+  .hb-search-box input::placeholder { color: var(--text-tertiary); }
+  .hb-search-box input:focus { border-color: var(--focus-border); }
+  .hb-search .hb-ic-search {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; pointer-events: none;
+  }
+  /* The chevron expands the grouped document-name dropdown. */
+  .hb-search-toggle {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    display: flex; width: 24px; height: 24px; align-items: center;
+    justify-content: center; border-radius: 4px;
+  }
+  .hb-search-toggle:hover { background: var(--bg-subtle); }
+  .hb-search-toggle svg { width: 16px; height: 16px; display: block; transition: transform .15s; }
+  .hb-search-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  #hb-namedrop {
+    position: absolute; z-index: 45; top: 38px; left: 12px; right: 12px;
+    max-height: 240px; overflow-y: auto;
+    background: var(--bg-main); border: 1px solid var(--border-subtle);
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.08); padding: 4px;
+  }
+  #hb-namedrop[hidden] { display: none; }
+  .hb-name-row {
+    display: flex; width: 100%; align-items: center;
+    padding: 6px 8px; border-radius: 4px; text-align: left;
+  }
+  .hb-name-row:hover { background: var(--bg-subtle); }
+  .hb-name-row .nm {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-primary);
+  }
+  .hb-name-row.all .nm { color: var(--text-secondary); font-weight: 400; }
+  /* Roomier than the comp's pad 4/6 gap 2 by request — the colors, type,
+     and icon geometry stay 1:1. */
+  #hb-items { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .hb-item {
+    display: block; border-radius: 6px; padding: 8px 10px; text-decoration: none;
+    color: inherit;
+  }
+  a.hb-item:hover { background: var(--bg-subtle); }
+  .hb-item.current { background: var(--bg-subtle); }
+  .hb-item .r1 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 20px; }
+  .hb-chip {
+    flex-shrink: 0; box-sizing: border-box; padding: 4px 8px; height: 20px;
+    border-radius: 20px; border: 1px solid var(--border-subtle);
+    background: var(--bg-main); color: var(--text-secondary);
+    font-size: 10px; line-height: 12px; font-weight: 500;
+  }
+  .hb-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 12px; line-height: 15px; font-weight: 500;
+    color: var(--text-primary);
+  }
+  .hb-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; }
+  .hb-dot.complete { background: var(--warm-green-700); }
+  .hb-dot.pending { background: #EAAA08; animation: hbpulse 1.2s ease-in-out infinite; }
+  .hb-dot.failed { background: #D92D20; }
+  @keyframes hbpulse { 50% { opacity: .35; } }
+  .hb-meta {
+    margin-top: 4px; font-size: 11px; line-height: 13px; font-weight: 500;
+    color: var(--text-tertiary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* The short id is a character-range override in the comp (node 51:367):
+     JetBrains Mono 500 #9E9E9E — and it keeps that color even on failed
+     rows, where only the rest of the line goes red (node 51:437). */
+  .hb-meta .jid {
+    cursor: help; margin-right: 2px; color: #9E9E9E;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .hb-item.failed .hb-meta { color: #D92D20; }
+  .hb-building { font-style: italic; }
+  .hb-empty { padding: 16px; font-size: 12px; color: var(--text-tertiary); text-align: center; }
+  /* Collapse/expand — VUI GlobalSidebarV3: an IconSidebar ghost button in
+     the header; collapsed is a 52px rail (width animates 300ms
+     ease-in-out) showing the centered LandingAI mark, which swaps to the
+     expand button on hover; the whole rail is click-to-expand
+     (cursor: e-resize). The inner content keeps its 260px layout and is
+     CLIPPED by the shrinking rail while it fades — display toggles don't
+     animate and would make the shrink read as a jump. visibility flips at
+     the transition's end so hidden content can't take clicks or focus. */
+  .hb-toggle, .hb-expand {
+    display: flex; width: 28px; height: 28px; flex-shrink: 0;
+    align-items: center; justify-content: center; border-radius: 6px;
+    color: var(--text-secondary);
+  }
+  .hb-toggle:hover, .hb-expand:hover { background: var(--bg-subtle); }
+  .hb-expand {
+    display: none; position: absolute; left: 12px; top: 50%;
+    transform: translateY(-50%);
+  }
+  .hb-head { position: relative; width: 260px; transition: padding .3s ease-in-out, border-color .3s ease-in-out; }
+  .hb-search, #hb-items { width: 260px; }
+  .hb-title-text, .hb-filterbtn, .hb-toggle, .hb-search, #hb-items {
+    transition: opacity .3s ease-in-out, visibility .3s;
+  }
+  #histbar.collapsed { width: 52px; cursor: e-resize; }
+  #histbar.collapsed .hb-title-text,
+  #histbar.collapsed .hb-filterbtn,
+  #histbar.collapsed .hb-toggle,
+  #histbar.collapsed .hb-search,
+  #histbar.collapsed #hb-items { opacity: 0; visibility: hidden; }
+  /* 16px→14px left padding tweens the 24px mark into dead center of 52. */
+  #histbar.collapsed .hb-head { padding-left: 14px; border-bottom-color: transparent; }
+  #histbar.collapsed:hover .hb-title { visibility: hidden; }
+  #histbar.collapsed:hover .hb-expand { display: flex; }
+  /* Collapsed rail: total job-item count as a pill centered under the
+     mark — the rail's only hint of how much history hides behind it.
+     Fades opposite the 260px content; pointer-events off so clicks fall
+     through to the rail's click-to-expand. */
+  .hb-collapsed-count {
+    position: absolute; top: 61px; left: 50%; transform: translateX(-50%);
+    padding: 2px 6px; border-radius: 999px;
+    background: var(--bg-subtle); color: var(--text-secondary);
+    font-size: 10px; line-height: 12px; font-weight: 500;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .3s ease-in-out, visibility .3s;
+  }
+  #histbar.collapsed .hb-collapsed-count { opacity: 1; visibility: visible; }
+  /* Applied for the first frame when a page loads already-collapsed
+     (#sb=c): arriving mid-navigation must not replay the shrink. */
+  #histbar.no-anim, #histbar.no-anim * { transition: none !important; }
+  #hb-pop {
+    position: absolute; z-index: 40; top: 42px; left: 12px; right: 12px;
+    background: var(--bg-main); border: 1px solid var(--border-subtle);
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.08); padding: 8px;
+    display: none;
+  }
+  #hb-pop.open { display: block; }
+  #hb-pop .sec {
+    font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: .04em; margin: 10px 8px 4px;
+  }
+  #hb-pop .sec:first-child { margin-top: 2px; }
+  #hb-pop label {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 6px 8px; border-radius: 4px;
+    font-size: 12px; line-height: 16px; font-weight: 500;
+    color: var(--text-secondary); white-space: nowrap;
+  }
+  #hb-pop label:hover { background: var(--bg-subtle); }
+  #hb-pop input {
+    width: 14px; height: 14px; flex-shrink: 0; margin: 0;
+    accent-color: var(--warm-green-700); /* design's checkbox/radio color */
+  }
+  #hb-pop .hb-clear {
+    display: block; margin-top: 8px; width: 100%; height: 28px;
+    text-align: center; font-size: 12px; font-weight: 500; line-height: 16px;
+    border-radius: 6px; border: 1px solid var(--border-subtle);
+    background: var(--bg-main); color: var(--text-secondary);
+  }
+  #hb-pop .hb-clear:hover { background: var(--bg-subtle); }
+
+  /* ── Header — VUI ProjectHeader.tsx:327-433 (h-[52px] bar; left nav is
+     project › 📄 document + pagination; workflow pills sit at the pane
+     divider). The logo replaces the app's global nav brand (VUI keeps it
+     outside this header; leftmost is the natural slot here). */
+  header {
+    position: relative; display: flex; height: 52px; flex-shrink: 0;
+    align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle); background: var(--bg-raised);
+    padding: 0 16px;
+  }
+  header nav { display: flex; min-width: 0; align-items: center; gap: 8px; }
+  .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .crumb-sep { color: var(--text-tertiary); flex-shrink: 0; }
+  .doc-emoji { font-size: 13px; line-height: 1; flex-shrink: 0; } /* VUI ProjectHeader.tsx:421-423 */
+  .doc-name {  /* VUI ProjectHeader.tsx:424-426 */
+    min-width: 0; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 14px; font-weight: 500; color: var(--text-primary);
+  }
+  /* Pagination — VUI HeaderPagination.tsx:24-60 */
+  /* Page navigator — Figma 46:1104: gap 4, 16px chevrons (#44423C,
+     disabled #A7B7CC), Inter 400 12/16 numbers, slash drawn as a line.
+     Positioned per 46:1096: right-aligned inside the doc pane's header,
+     16px from the pane's right edge (left set by positionPills). */
+  .pagination { display: flex; flex-shrink: 0; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+  .pagination[hidden] { display: none; }
+  #pagination { position: absolute; top: 50%; transform: translateY(-50%); }
+  .pagination button {
+    display: flex; width: 16px; height: 16px; align-items: center; justify-content: center;
+    border-radius: 2px; color: var(--text-secondary); transition: background-color .15s;
+  }
+  .pagination button:hover:not(:disabled) { background: var(--bg-subtlest); }
+  .pagination button:disabled { cursor: not-allowed; color: var(--text-disabled); }
+  .pagination .nums {
+    display: flex; align-items: center; gap: 4px;
+    font-variant-numeric: tabular-nums; color: var(--text-secondary);
+  }
+  .pagination .pg-slash { display: block; width: 5px; height: 10px; }
+
+  /* Workflow pills — VUI ProjectHeader.tsx:578-717 (ProgressPill/Connector);
+     absolutely positioned at the doc-pane width (client.tsx:435-437). */
+  #pills { position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; }
+  .pill {
+    display: flex; flex-shrink: 0; align-items: center; gap: 6px;
+    border-radius: 6px; border: 1px solid var(--border-subtle); background: var(--bg-main);
+    padding: 4px 6px; transition: background-color .15s;
+  }
+  .pill:hover { background: var(--bg-subtlest); }
+  .pill.active { border-color: var(--warm-green-400); background: var(--bg-highlight); }
+  .pill .pill-icon {
+    display: flex; width: 24px; height: 24px; align-items: center; justify-content: center;
+    border-radius: 4.286px; background: var(--bg-subtle);
+  }
+  .pill.active .pill-icon { background: var(--warm-green-500); }
+  .pill .pill-label { white-space: nowrap; padding-right: 2px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-secondary); }
+  .pill.active .pill-label { font-weight: 600; color: var(--text-primary); }
+  .connector { display: block; height: 1px; width: 16px; flex-shrink: 0; background: var(--warm-green-300); }
+
+  /* ── Split panes — VUI client.tsx:2427-2556: left pane preferredSize 33%,
+     minSize 300; right pane minSize 400. Sash from globals.css:726-753. */
+  main { flex: 1; display: flex; min-height: 0; }
+  /* Doc pane background — VUI client.tsx:2430-2442: bg-highlight behind the
+     white page sheets, so the inter-page gap reads as a page break. */
+  #docpane {
+    position: relative; display: flex; flex-direction: column;
+    min-width: 300px; width: 33%; background: var(--bg-highlight);
+  }
+  #sash {
+    position: relative; width: 1px; flex-shrink: 0; background: var(--border-subtle); cursor: col-resize;
+  }
+  #sash::before { content: ''; position: absolute; inset: 0 -4px; } /* grab area */
+  #sash::after { /* the 8x36 pill handle, VUI globals.css:736-749 */
+    content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 8px; height: 36px; border-radius: 6px; background: #f8fafc;
+    border: 1px solid var(--border-subtle); pointer-events: none;
+    transition: background-color .1s ease-in-out;
+  }
+  body.resizing #sash { background: var(--focus-border); }
+  #rightpane { display: flex; min-width: 400px; flex: 1; flex-direction: column; min-height: 0; }
+
+  /* ── Document pane — VUI MediaDisplay.tsx:703-786 (px-4 stack, images
+     w-full mb-1) with the DPT-3 overlay from DocExtractionAnnotationsDpt3. */
+  /* Page stack spacing — Figma 46:1111 'main view': 16px top/bottom
+     padding, 8px break between page sheets. */
+  #pages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; }
+  .page { position: relative; width: 100%; }
+  .page img { display: block; width: 100%; height: auto; margin-bottom: 8px; }
+  .page .placeholder {
+    width: 100%; aspect-ratio: 8.5 / 11; margin-bottom: 8px; border: 1px dashed var(--warm-green-400);
+    background: repeating-linear-gradient(45deg, #fdfdfe, #fdfdfe 12px, var(--bg-subtlest) 12px, var(--bg-subtlest) 24px);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-tertiary); font-size: 12.5px;
+  }
+  .banner {
+    padding: 6px 16px; font-size: 12.5px; background: #fefdf0; /* --bg-warning */
+    color: #a15c07; border-bottom: 1px solid var(--border-subtle);
+  }
+  /* Clear Selection — VUI client.tsx:2526-2541: floating pill, bottom-right
+     of the doc pane, shown only while a selection exists. */
+  #clearsel {
+    position: absolute; right: 12px; bottom: 12px; z-index: 30;
+    border-radius: 999px; background: var(--bg-main); padding: 8px 16px;
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    box-shadow: 0 4px 12px rgba(0,0,0,.12); display: none;
+  }
+  #clearsel.on { display: block; }
+
+  /* Box outline via inset box-shadow, not border — a border would shift the
+     percentage coordinate frame of nested sub-boxes (VUI
+     DocExtractionAnnotationsDpt3.tsx:251-255 uses the same technique). */
+  /* State machine — VUI DocExtractionAnnotationsDpt3.tsx:216-258 (parent)
+     and :286-350 (sub-boxes), fine-grained eye setting OFF (the default):
+     parent at rest = 2px outline + color33 (~20%) fill; hover/selected
+     CLEAR the fill so the content stays readable — including while a line
+     inside is the selection (the parent stays lit border-only). A selected
+     parent's sub-boxes mount as invisible hit targets; ONLY the hovered/
+     selected sub-chunk paints (thin outline + color33 fill). With the
+     setting ON, parent fills stay transparent in every state and sub
+     outlines render at rest. */
+  .box {
+    position: absolute; cursor: pointer; box-shadow: inset 0 0 0 2px var(--c);
+    background: color-mix(in srgb, var(--c) 20%, transparent); transition: opacity .15s;
+  }
+  body.show-fine .box, .box:hover, .box.hov, .box.sel { background: transparent; }
+  .box.sel { z-index: 3; }
+  .box.sub {
+    box-shadow: inset 0 0 0 1px transparent; background: transparent;
+    display: none; z-index: 2;
+  }
+  body.show-fine .box.sub { box-shadow: inset 0 0 0 1px var(--c); }
+  .box.sub:hover, .box.sub.hov, .box.sub.sel {
+    box-shadow: inset 0 0 0 1px var(--c);
+    background: color-mix(in srgb, var(--c) 20%, transparent);
+  }
+  /* Fine-grained boxes: mounted by the eye toggle (VUI
+     alwaysShowFineGrainedGroundingAtom, atom.ts:299, default false) or a
+     selected parent (as hit targets — see the state machine above). */
+  body.show-fine .box.sub, .box.sub.reveal { display: block; }
+  .boxlabel {
+    position: absolute; top: -1.5em; left: 0; white-space: nowrap;
+    font-size: 10.5px; padding: 0 5px; border-radius: 3px;
+    background: var(--c); color: #fff; display: none; z-index: 4;
+  }
+  .box:hover > .boxlabel, .box.sel > .boxlabel, .box.hov > .boxlabel { display: block; }
+
+  /* ── Parse toolbar — VUI ProjectParseTab.tsx:351 */
+  #toolbar {
+    z-index: 20; display: flex; width: 100%; flex-shrink: 0; align-items: center;
+    justify-content: space-between; border-bottom: 1px solid var(--border-subtle);
+    padding: 12px 12px 8px;
+  }
+  /* FormatToggle segmented control — VUI ProjectParseTab.tsx:655-693 */
+  .format-toggle { display: inline-flex; align-items: center; border-radius: 6px; background: var(--bg-subtle); }
+  .format-toggle button {
+    display: flex; align-items: center; border-radius: 6px; padding: 6px 8px;
+    border: 1px solid transparent; transition: background-color .15s;
+  }
+  .format-toggle button.active { border-color: var(--border-subtle); background: var(--bg-main); }
+  .format-toggle .seg-label { padding: 0 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-primary); }
+  .toolbar-right { display: flex; align-items: center; gap: 8px; }
+  .toolbar-group { display: flex; align-items: center; gap: 4px; }
+  .divider { height: 24px; width: 0; border-right: 1px solid var(--border-subtle); } /* VUI ProjectParseTab.tsx:531 */
+  /* Model chip — Figma 130:357: ghost, 24px, r4, pad 4; label Inter 500
+     12/16 #1A1916 with 4px side padding. Informational: hover = full
+     resolved model version. */
+  .model-chip { display: flex; align-items: center; height: 24px; padding: 4px; border-radius: 4px; cursor: help; }
+  .model-chip:hover { background: var(--bg-subtlest); }
+  .model-chip .model-label { padding: 0 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-primary); white-space: nowrap; }
+  .credits { white-space: nowrap; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--text-tertiary); }
+  .credits b { font-weight: 500; color: var(--text-secondary); }
+  .icon-btn {
+    display: flex; width: 28px; height: 28px; align-items: center; justify-content: center;
+    border-radius: 4px; color: var(--text-primary); transition: background-color .15s;
+  }
+  .icon-btn:hover { background: var(--bg-main-hovered); }
+  svg.i { width: 16px; height: 16px; }
+
+  /* Eye popover — VUI DisplaySettingsDropdown.tsx:96-116 (w-[338px]) */
+  #eyewrap { position: relative; }
+  #eyepop {
+    position: absolute; right: 0; top: calc(100% + 6px); width: 338px; z-index: 40;
+    border: 1px solid var(--border-subtle); background: var(--bg-main);
+    border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.08); padding: 12px;
+    display: none; flex-direction: column; gap: 8px;
+  }
+  #eyepop.open { display: flex; }
+  #eyepop .section { font-size: 12px; font-weight: 500; line-height: 16px; color: var(--text-tertiary); }
+  #eyepop .row { display: flex; align-items: center; gap: 12px; }
+  #eyepop .grow { display: flex; flex: 1; flex-direction: column; }
+  #eyepop .title { font-size: 12px; font-weight: 600; line-height: 16px; color: var(--text-primary); }
+  #eyepop .desc { font-size: 12px; line-height: 16px; color: var(--text-tertiary); }
+  .switch { position: relative; width: 28px; height: 16px; border-radius: 999px; background: var(--warm-green-300); transition: background .15s; flex-shrink: 0; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .switch.on { background: var(--warm-green-700); } /* VUI DisplaySettingsDropdown.tsx:113 */
+  .switch.on::after { left: 14px; }
+
+  /* ── Markdown pane — VUI Dpt3ChunksMarkdown.tsx:242-315: rows are
+     `mb-4 rounded p-2` cards with a floating capitalized label at
+     -top-3; default no box, hover = 1px color border + color1A fill,
+     selected = border only (reads cleaner than hover). */
+  #content { min-height: 0; flex: 1; overflow: auto; padding: 16px 8px 8px; font-size: 14px; }
+  .mdrow {
+    position: relative; margin-bottom: 16px; padding: 8px; border-radius: 4px;
+    border: 1px solid transparent; cursor: pointer;
+  }
+  /* Bring-your-own-markdown items: the input rendered whole, no element
+     tiling, no hover affordances. */
+  .mdwhole { padding: 8px; }
+  .mdrow.hov { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+  .mdrow.sel { border-color: var(--c); background: transparent; }
+  .mdlabel {
+    position: absolute; top: -12px; left: 8px; border-radius: 2px;
+    border: 2px solid transparent; padding: 0 4px; font-size: 12px;
+    line-height: 1.4; text-transform: capitalize; color: var(--text-tertiary);
+    background: transparent; white-space: nowrap;
+  }
+  .mdrow.hov .mdlabel { color: var(--c); }
+  .mdrow.sel .mdlabel { background: var(--c); border-color: var(--c); color: #fff; }
+  /* Page separator between rows when the page changes —
+     VUI Dpt3ChunksMarkdown.tsx:267-269 */
+  .pagesep { border: 0; border-top: 1px solid #b0cdae; margin: 16px 0 32px; }
+  /* Region-divided rows: one continuous <p>, one span per tile segment;
+     highlight = color at 0x33 alpha, box-decoration-clone, rounded 2px —
+     VUI Dpt3ChunksMarkdown.tsx:355-415 (the 2026-07-15 highlight fix). */
+  .mdrow p.regions { white-space: pre-line; margin: 0; }
+  span.region { box-decoration-break: clone; -webkit-box-decoration-break: clone; border-radius: 2px; cursor: pointer; background: transparent; }
+  span.region.hov, span.region.sel { background: color-mix(in srgb, var(--c) 20%, transparent); }
+  /* Plain markdown body (mini renderer output) */
+  .mdbody { cursor: pointer; }
+  .mdbody p, .mdbody div.rawhtml { margin: 0 0 8px; white-space: pre-line; } /* VUI MemoizedReactMarkdown.tsx:276 */
+  .mdbody h1, .mdbody h2, .mdbody h3, .mdbody h4 { margin: 4px 0 8px; line-height: 1.3; }
+  .mdbody ul { margin: 0 0 8px; padding-left: 22px; }
+  .mdbody code { background: var(--bg-subtle); border-radius: 3px; padding: 0 4px; font-size: 13px; }
+  .mdbody a { color: #3b82f6; } .mdbody a:hover { text-decoration: underline; } /* MemoizedReactMarkdown.tsx:319-325 */
+  .mdbody figure { margin: 0 0 8px; white-space: pre-line; }
+  .mdbody > :last-child, .mdrow p.regions { margin-bottom: 0; } /* row spacing comes from mb-4 (VUI [&_p]:mb-0) */
+  /* Tables — VUI MemoizedReactMarkdown.tsx:326-401 + buildDpt3TableHtml */
+  table.cells { width: 100%; border-collapse: collapse; margin: 8px 0 4px; }
+  table.cells td {
+    border: 1px solid var(--border-subtle); padding: 3px 8px; cursor: pointer; --c: #2193FD;
+    font-size: 13px;
+  }
+  table.cells td.hov { background: color-mix(in srgb, var(--c) 12%, transparent); }
+  /* Selected cell: colored border + color33 fill — VUI
+     MemoizedReactMarkdown.tsx:333-401 (td override). */
+  table.cells td.sel { border-color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
+
+  /* JSON view — VUI Dpt3RawJsonView.tsx:289-292 (container) +
+     ReadOnlyJsonView.tsx (fontSize 13, lineHeight 20, no line numbers,
+     light "vs" theme colors). */
+  #jsonview {
+    display: none; flex: 1; min-height: 0; margin: 0;
+    border-radius: 5px; border: 1px solid var(--border-subtle);
+    background: var(--bg-subtlest); padding: 8px 12px; overflow: auto;
+    font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+  }
+  /* Monaco "vs" theme JSON tokens (monaco-editor themes.js: string.key.json
+     A31515, string.value.json / keyword.json 0451A5, number 098658). */
+  .j-key { color: #a31515; } .j-str { color: #0451a5; } .j-num { color: #098658; }
+  .j-lit { color: #0451a5; }
+  /* Per-element block highlight — the static take on Dpt3RawJsonView's
+     Monaco overlay (Dpt3RawJsonView.tsx:302-339): hover = color0D fill +
+     color1A border, selected = color1A fill + solid color border. */
+  /* inline-block so the whole element object paints one rectangle (like
+     Monaco's overlay), not a per-line ladder; inner indentation is written
+     relative to the block for exactly this reason. */
+  .jblock { display: inline-block; vertical-align: top; cursor: pointer; }
+  .jblock.hov { background: color-mix(in srgb, var(--c) 5%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 10%, transparent); }
+  .jblock.sel { background: color-mix(in srgb, var(--c) 10%, transparent);
+    box-shadow: 0 0 0 1px var(--c); }
+
+  /* ── Extract tab — VUI ProjectExtractTab.tsx:958-1114: a horizontal
+     50/50 split, Results LEFT, Schema RIGHT (Allotment defaultSizes
+     [50,50] at :1039; fixed split here). */
+  #extract { display: none; min-height: 0; flex: 1; overflow: hidden; }
+  .ex-split { display: flex; flex-direction: row; height: 100%; width: 100%; flex: 1; min-width: 0; }
+  .ex-scroll { min-width: 0; }
+  .ex-results { display: flex; flex: 1; min-width: 0; flex-direction: column; border-right: 1px solid var(--border-subtle); }
+  .ex-schema { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+  /* Panel headers — ProjectExtractionResults.tsx:68 / SchemaVersionSelector.tsx:70.
+     min-height pins them to the Parse toolbar's computed height (28px
+     toggle + 2px borders + 12/8 padding + 1px border = 51px) so switching
+     workflow pills never shifts the header band. */
+  .ex-panel-head {
+    display: flex; flex-shrink: 0; align-items: center; gap: 6px;
+    border-bottom: 1px solid var(--border-subtle); padding: 8px 16px;
+    min-height: 51px;
+  }
+  .ex-panel-head .ptitle { font-size: 15px; font-weight: 600; line-height: 20px; color: var(--text-primary); }
+  /* Credits sit at the header's right edge, mirroring the Parse toolbar. */
+  .ex-panel-head .credits { margin-left: auto; }
+  .ex-panel-head select {
+    font: 12px/1.3 inherit; color: var(--text-secondary); background: var(--bg-main);
+    border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 6px;
+  }
+  .ex-scroll { min-height: 0; flex: 1; overflow: auto; }
+  /* Partial-extraction warning (#118) — an amber ⚠️ beside the Results
+     title; hover reveals the messages. Palette follows the playground's
+     Schema Validation Error toast (bg-amber-50, ring-amber-200) and the
+     stale badge. */
+  .ex-warn { position: relative; display: inline-flex; align-items: center; font-size: 13px; cursor: default; }
+  /* The 6px visual gap is transparent PADDING on the (hover-tracked)
+     tooltip container, never empty space between elements — crossing it
+     keeps :hover alive, so the message stays put to be selected and
+     copied. The delayed visibility flip is a grace period for a cursor
+     that briefly strays off the corridor. */
+  .ex-warn .ex-warn-tip {
+    position: absolute; top: 100%; left: -8px; z-index: 40;
+    padding-top: 6px; width: 360px; max-width: 60vw;
+    visibility: hidden; opacity: 0;
+    transition: opacity .12s ease, visibility 0s linear .3s;
+  }
+  .ex-warn:hover .ex-warn-tip { visibility: visible; opacity: 1; transition-delay: 0s; }
+  .ex-warn-box {
+    padding: 8px 10px; border-radius: 6px;
+    border: 1px solid #f4e9c5; background: #fefdf0; color: #a15c07;
+    font-size: 12px; line-height: 16px; white-space: pre-wrap;
+    box-shadow: 0 4px 12px rgba(16,24,40,.12); cursor: text;
+  }
+  .ex-warn-box b { font-weight: 600; }
+  .ex-warn-box div + div { margin-top: 6px; }
+  /* Collapsible sections — ExtractedDataJSONView.tsx:491 ("Extraction",
+     default open :195) and :690 ("Extract Metadata", default closed :680). */
+  .ex-section { border: 1px solid var(--border-subtle); border-bottom: 0; background: var(--bg-subtlest); overflow: hidden; }
+  .ex-section:last-child { border-bottom: 1px solid var(--border-subtle); }
+  .ex-sec-head { display: flex; height: 24px; align-items: center; gap: 4px; cursor: pointer; border-bottom: 1px solid var(--border-subtle); padding: 0 12px; font-size: 12px; font-weight: 500; color: var(--text-primary); }
+  .ex-sec-head .chev { transition: transform .15s; font-size: 10px; color: var(--text-tertiary); }
+  .ex-section.open .ex-sec-head .chev { transform: rotate(90deg); }
+  /* Section BODY is white like the playground: VUI's expanded body is the
+     Monaco editor (vs theme background #fffffe — ReadOnlyJsonView.tsx, no
+     app override) and its mobile branch inherits bg-main; only the section
+     container + header carry bg-subtlest (ExtractedDataJSONView.tsx:491). */
+  .ex-sec-body { display: none; background: var(--bg-main); }
+  .ex-section.open .ex-sec-body { display: block; }
+  /* JSON lines — the static model is VUI's own non-Monaco branch
+     (ExtractedDataJSONView.tsx:446-486): a <pre> of clickable line divs;
+     hover/selected line = border-l-2 #12B76A + rgba(18,183,106,.1/.15)
+     (the Monaco overlays at :539-557 use the same colors). */
+  /* margin: 0 kills the <pre> UA default (1em 0), which opened a gap band
+     of section bg-subtlest around the white body. VUI has no such band:
+     Tailwind preflight zeroes pre margins (mobile branch), and the Monaco
+     body sits flush under the header — its +12px content-height fudge
+     (ExtractedDataJSONView.tsx:527,707) is this 6px top+bottom padding. */
+  .ex-json { margin: 0; font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; padding: 6px 0; overflow-x: auto; }
+  .ex-line { position: relative; height: 20px; padding: 0 16px 0 12px; border-left: 2px solid transparent; }
+  .ex-line[data-path] { cursor: pointer; }
+  .ex-line[data-path]:hover, .ex-line.hovline { border-left-color: #12B76A; background: rgba(18,183,106,.1); }
+  .ex-line.sel { border-left-color: #12B76A; background: rgba(18,183,106,.15); }
+  /* Inline right-side labels — ExtractedDataJSONView.tsx:583-611 */
+  .ex-line .linelabel { position: absolute; right: 16px; top: 0; font-size: 12px; font-style: italic; color: var(--text-tertiary); pointer-events: none; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--bg-highlight); color: var(--text-secondary); }
+  .badge.stale { background: #fefdf0; color: #a15c07; }
+  /* Schema tree — read-only SchemaTreeEditor.tsx rows (:462-486): name +
+     colored type badge on one row, description on its own row below;
+     children indent 16px (:337); highlight bg-green-400/10 on path
+     prefixes (:311-315,:348). */
+  .sc-tree { padding: 12px 16px 12px 8px; }
+  .sc-row { position: relative; padding: 5px 12px 5px 32px; border-radius: 4px; }
+  .sc-row:hover { background: var(--bg-subtlest); }
+  .sc-row.hl { background: rgba(74,222,128,.1); }
+  /* Expand/collapse chevron — a real toggle (SchemaTreeEditor.tsx:383-404):
+     expanded = rotate-90, with the same transition. */
+  .sc-row .schevbtn { position: absolute; left: 16px; top: 9px; display: flex; width: 16px; height: 16px; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); }
+  .sc-row .schevbtn svg { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .15s; }
+  .sc-row.closed .schevbtn svg { transform: rotate(0deg); }
+  .sc-row .srow1 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .sc-row .sname { padding: 2px 4px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+  /* Type badges — getTypeBadgeClasses (SchemaTreeEditor.tsx:205-215) with
+     the accent tokens from globals.css. */
+  .sc-row .stype { display: inline-flex; align-items: center; border-radius: 5px; padding: 2px 8px; font-size: 12px; font-weight: 500; color: var(--text-primary); border: 1px solid; }
+  .stype.t-object  { background: #ecfdf3; border-color: #d1fadf; }
+  .stype.t-string  { background: #fefbe8; border-color: #fef7c3; }
+  .stype.t-number  { background: #f4f3ff; border-color: #ebe9fe; }
+  .stype.t-boolean { background: #fef3f2; border-color: #fee4e2; }
+  .stype.t-enum    { background: #ebf7ff; border-color: #def3ff; }
+  .sc-row .sdesc { padding: 0 4px; font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-kids { margin-left: 16px; }
+  /* Evidence layer: the shown extraction's grounded boxes stay lit (#10) —
+     outlined and tinted at rest whatever the eye toggle says (VUI's extract
+     line-level mode likewise paints referenced sub-boxes at rest; the
+     body.show-fine selector out-specifies the parent fill-clear rule). */
+  .box.evid, body.show-fine .box.evid { display: block; background: color-mix(in srgb, var(--c) 8%, transparent); }
+  .box.sub.evid { box-shadow: inset 0 0 0 1px var(--c); }
+  /* While a selection exists, non-selected boxes fade to opacity 0 but
+     STAY in the DOM and hoverable — VUI DocExtractionAnnotationsDpt3.tsx:
+     153,181-183 (`opacity-0 transition-opacity` + `show && 'opacity-100'`
+     where show includes isHovered): mousing over a hidden chunk's area
+     brings it back. .reveal (the selected parent's own sub-boxes) stays. */
+  body.has-selection #pages .box:not(.sel):not(.hov):not(.reveal):not(:hover) { opacity: 0; }
+
+  @keyframes ade-flash {
+    0%, 60% { outline: 3px solid #f79009; outline-offset: 2px; }
+    100% { outline: 3px solid transparent; outline-offset: 2px; }
+  }
+  .flash { animation: ade-flash 1.6s ease-out 2; }
+</style>
+</head>
+<body>
+<aside id="histbar" hidden>
+  <!-- Sidebar icons are exported verbatim from Figma CLI-Viewer-UI node
+       46:1122 (REST API, format=svg): LandingAI mark 46:1125, filter
+       funnel 46:1128, search + chevron from the input instance 46:1136. -->
+  <div class="hb-head">
+    <span class="hb-title"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><mask id="mask0_46_1125" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="4" y="1" width="17" height="22"><path d="M20.01 1.6533H4.48999V22.3467H20.01V1.6533Z" fill="white"/></mask><g mask="url(#mask0_46_1125)"><path d="M4.62885 14.1356C4.56618 14.1016 4.48999 14.147 4.48999 14.2183V18.2797C4.48999 18.3142 4.5089 18.346 4.53925 18.3624L7.74406 20.0983C7.80673 20.1323 7.88292 20.0869 7.88292 20.0156V15.9542C7.88292 15.9196 7.86401 15.8879 7.83365 15.8715L4.62885 14.1356Z" fill="black"/><path d="M4.62885 9.11869C4.56618 9.08474 4.48999 9.13012 4.48999 9.2014V13.2628C4.48999 13.2974 4.5089 13.3291 4.53925 13.3456L7.74406 15.0814C7.80673 15.1154 7.88292 15.07 7.88292 14.9987V10.9373C7.88292 10.9028 7.86401 10.871 7.83365 10.8546L4.62885 9.11869Z" fill="black"/><path d="M4.62885 4.10158C4.56618 4.06764 4.48999 4.11301 4.48999 4.18429V8.24572C4.48999 8.28024 4.5089 8.31199 4.53925 8.32843L7.74406 10.0643C7.80673 10.0983 7.88292 10.0529 7.88292 9.98163V5.92023C7.88292 5.88571 7.86401 5.85396 7.83365 5.83752L4.62885 4.10158Z" fill="black"/><path d="M16.6467 15.8715C16.6163 15.8879 16.5974 15.9196 16.5974 15.9542V20.0156C16.5974 20.0869 16.6736 20.1323 16.7363 20.0983L19.9411 18.3624C19.9715 18.346 19.9904 18.3142 19.9904 18.2797V14.2183C19.9904 14.147 19.9142 14.1016 19.8515 14.1356L16.6467 15.8715Z" fill="black"/><path d="M8.58142 10.8546C8.55111 10.871 8.53223 10.9027 8.53223 10.9372V14.9986C8.53223 15.0699 8.60848 15.1153 8.67115 15.0813L11.8696 13.3456C11.8999 13.3291 11.9188 13.2974 11.9188 13.2629V9.20154C11.9188 9.13023 11.8425 9.08485 11.7799 9.11886L8.58142 10.8546Z" fill="black"/><path d="M8.58142 5.83751C8.55111 5.85396 8.53223 5.88569 8.53223 5.92018V9.98149C8.53223 10.0528 8.60848 10.0982 8.67115 10.0642L11.8696 8.32845C11.8999 8.31199 11.9188 8.28027 11.9188 8.24577V4.18443C11.9188 4.11312 11.8425 4.06775 11.7799 4.10176L8.58142 5.83751Z" fill="black"/><path d="M11.4229 3.56725C11.4885 3.5317 11.4886 3.43757 11.423 3.40192L8.25272 1.67776C8.22469 1.66252 8.19086 1.66252 8.16284 1.67776L4.99254 3.40192C4.92699 3.43757 4.92706 3.5317 4.99266 3.56725L8.16296 5.28534C8.19092 5.3005 8.22464 5.3005 8.25259 5.28534L11.4229 3.56725Z" fill="black"/><path d="M8.67115 16.3089C8.60848 16.2748 8.53223 16.3202 8.53223 16.3915V20.4529C8.53223 20.4874 8.55111 20.5191 8.58142 20.5356L11.7799 22.2713C11.8425 22.3053 11.9188 22.26 11.9188 22.1886V18.1272C11.9188 18.0927 11.8999 18.061 11.8696 18.0446L8.67115 16.3089Z" fill="black"/><path d="M12.6174 18.0446C12.587 18.061 12.5681 18.0928 12.5681 18.1273V22.1888C12.5681 22.2601 12.6443 22.3054 12.707 22.2715L15.9117 20.5355C15.9421 20.5191 15.961 20.4873 15.961 20.4528V16.3914C15.961 16.3201 15.8848 16.2747 15.8221 16.3087L12.6174 18.0446Z" fill="black"/><path d="M9.02816 15.6155C8.96266 15.6512 8.96266 15.7452 9.02816 15.7808L12.1987 17.5051C12.2268 17.5203 12.2606 17.5203 12.2886 17.5051L15.4592 15.7808C15.5247 15.7452 15.5247 15.6512 15.4592 15.6155L12.2886 13.8912C12.2606 13.8759 12.2268 13.8759 12.1987 13.8912L9.02816 15.6155Z" fill="black"/><path d="M19.4949 13.595C19.5603 13.5593 19.5603 13.4653 19.4947 13.4297L16.3305 11.7116C16.3025 11.6965 16.2688 11.6964 16.2408 11.7116L13.0705 13.4297C13.0049 13.4652 13.0049 13.5594 13.0704 13.595L16.2407 15.3191C16.2687 15.3344 16.3026 15.3344 16.3306 15.3191L19.4949 13.595Z" fill="black"/></g></svg><span class="hb-title-text">Documents Viewer</span></span>
+    <!-- Sidebar toggle — VUI GlobalSidebarV3 / Icons.tsx IconSidebar -->
+    <button class="hb-toggle" id="hb-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M4.16667 17.5C3.70833 17.5 3.31597 17.3368 2.98958 17.0104C2.66319 16.684 2.5 16.2917 2.5 15.8333V4.16667C2.5 3.70833 2.66319 3.31597 2.98958 2.98958C3.31597 2.66319 3.70833 2.5 4.16667 2.5H15.8333C16.2917 2.5 16.684 2.66319 17.0104 2.98958C17.3368 3.31597 17.5 3.70833 17.5 4.16667V15.8333C17.5 16.2917 17.3368 16.684 17.0104 17.0104C16.684 17.3368 16.2917 17.5 15.8333 17.5H4.16667ZM6.66667 15.8333V4.16667H4.16667V15.8333H6.66667ZM8.33333 15.8333H15.8333V4.16667H8.33333V15.8333Z"/></svg>
+    </button>
+    <button class="hb-expand" id="hb-expand" aria-label="Expand sidebar" title="Expand sidebar">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M4.16667 17.5C3.70833 17.5 3.31597 17.3368 2.98958 17.0104C2.66319 16.684 2.5 16.2917 2.5 15.8333V4.16667C2.5 3.70833 2.66319 3.31597 2.98958 2.98958C3.31597 2.66319 3.70833 2.5 4.16667 2.5H15.8333C16.2917 2.5 16.684 2.66319 17.0104 2.98958C17.3368 3.31597 17.5 3.70833 17.5 4.16667V15.8333C17.5 16.2917 17.3368 16.684 17.0104 17.0104C16.684 17.3368 16.2917 17.5 15.8333 17.5H4.16667ZM6.66667 15.8333V4.16667H4.16667V15.8333H6.66667ZM8.33333 15.8333H15.8333V4.16667H8.33333V15.8333Z"/></svg>
+    </button>
+  </div>
+  <div class="hb-collapsed-count" id="hb-count" hidden></div>
+  <div class="hb-search">
+    <div class="hb-search-box">
+      <svg class="hb-ic-search" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 7.07406C2 7.65285 2.114 8.22597 2.33549 8.76071C2.55699 9.29544 2.88163 9.78131 3.2909 10.1906C3.70017 10.5998 4.18603 10.9245 4.72077 11.146C5.2555 11.3675 5.82862 11.4815 6.40741 11.4815C6.9862 11.4815 7.55932 11.3675 8.09405 11.146C8.62878 10.9245 9.11465 10.5998 9.52391 10.1906C9.93318 9.78131 10.2578 9.29544 10.4793 8.76071C10.7008 8.22597 10.8148 7.65285 10.8148 7.07406C10.8148 6.49527 10.7008 5.92215 10.4793 5.38742C10.2578 4.85269 9.93318 4.36682 9.52391 3.95756C9.11465 3.54829 8.62878 3.22364 8.09405 3.00215C7.55932 2.78066 6.9862 2.66666 6.40741 2.66666C5.82862 2.66666 5.2555 2.78066 4.72077 3.00215C4.18603 3.22364 3.70017 3.54829 3.2909 3.95756C2.88163 4.36682 2.55699 4.85269 2.33549 5.38742C2.114 5.92215 2 6.49527 2 7.07406Z" stroke="#1A1916" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.3334 14L9.55566 10.2222" stroke="#1A1916" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <input id="hb-search-input" type="search" placeholder="Search" aria-label="Search documents by file name" autocomplete="off">
+      <button class="hb-search-toggle" id="hb-search-toggle" aria-label="Browse documents" aria-expanded="false">
+        <svg class="hb-ic-chevron" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.52851 6.19526C3.78886 5.93491 4.21097 5.93491 4.47132 6.19526L7.99993 9.72386L11.5285 6.19526C11.7889 5.93491 12.211 5.93491 12.4713 6.19526C12.7317 6.45561 12.7317 6.87772 12.4713 7.13807L8.47134 11.1381C8.34631 11.2631 8.17674 11.3333 7.99993 11.3333C7.82312 11.3333 7.65355 11.2631 7.52853 11.1381L3.52851 7.13807C3.26816 6.87772 3.26816 6.45561 3.52851 6.19526Z" fill="#44423C"/></svg>
+      </button>
+    </div>
+    <button class="hb-filterbtn" id="hb-filterbtn" aria-label="Filters" title="Filters">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.3334 2.66667H2.66675V4.15133C2.66678 4.48293 2.79038 4.80262 3.01341 5.048L6.00008 8.33333V14L10.0001 12.6667V8L12.9427 5.05733C13.1928 4.80734 13.3333 4.46826 13.3334 4.11467V2.66667Z" stroke="#1A1916" stroke-width="1.33333" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span id="hb-badge" hidden></span>
+    </button>
+    <div id="hb-namedrop" hidden></div>
+    <div id="hb-pop"></div>
+  </div>
+  <div id="hb-items"></div>
+</aside>
+<div id="appcol">
+<header>
+  <nav id="leftnav">
+    <span class="doc-emoji" aria-hidden="true">📄</span>
+    <span class="doc-name" id="docname"></span>
+  </nav>
+  <div class="pagination" id="pagination" hidden>
+    <!-- Page navigator — Figma 46:1104/46:1096: up/down chevrons (the page
+         stack scrolls vertically), right-aligned over the doc pane;
+         exported verbatim with fill=currentColor so :disabled grays them. -->
+    <button id="prevpage" aria-label="Previous page"><svg class="i" viewBox="0 0 16 16" fill="currentColor"><path d="M11.06 10.47L12 9.53L8 5.53L4 9.53L4.94 10.47L8 7.41667L11.06 10.47Z"/></svg></button>
+    <span class="nums"><span id="curpage">1</span><svg class="pg-slash" viewBox="0 0 5 10" fill="none" aria-hidden="true"><line x1="3.99454" y1="0.175594" x2="0.482655" y2="9.82441" stroke="#878682"/></svg><span id="totalpages">1</span></span>
+    <button id="nextpage" aria-label="Next page"><svg class="i" viewBox="0 0 16 16" fill="currentColor"><path d="M12 6.47L11.06 5.53L8 8.58333L4.94 5.53L4 6.47L8 10.47L12 6.47Z"/></svg></button>
+  </div>
+  <div id="pills"></div>
+  <div></div>
+</header>
+<div id="notebanner" class="banner" hidden></div>
+<main>
+  <section id="docpane">
+    <div id="pages"></div>
+    <button id="clearsel">Clear Selection</button>
+  </section>
+  <div id="sash" role="separator" aria-orientation="vertical"></div>
+  <section id="rightpane">
+    <div id="parse-tab" style="display:flex;flex-direction:column;min-height:0;flex:1;">
+      <div id="toolbar">
+        <div class="format-toggle" id="formattoggle">
+          <!-- VUI ProjectParseTab.tsx:661-668: IconMarkdown / IconJson segments -->
+          <!-- IconMarkdown — VUI Icons.tsx:1385-1414: bordered rect + "M↓" glyph -->
+          <button data-format="markdown" class="active"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" rx="1.67" width="15" height="13"/><path d="M5.83 13.33V6.67l2.5 3 2.5-3v6.66M14.17 6.67v6.66m0 0l-1.67-2M14.17 13.33l1.67-2"/></svg><span class="seg-label">Markdown</span></button>
+          <button data-format="json"><svg class="i" viewBox="0 0 20 20" fill="currentColor"><path d="M11.6666 16.6666V14.9999H14.1666C14.4027 14.9999 14.6007 14.9201 14.7604 14.7603C14.9201 14.6006 15 14.4027 15 14.1666V12.4999C15 11.9721 15.1527 11.493 15.4583 11.0624C15.7638 10.6319 16.1666 10.3263 16.6666 10.1458V9.85408C16.1666 9.67353 15.7638 9.36797 15.4583 8.93742C15.1527 8.50686 15 8.0277 15 7.49992V5.83325C15 5.59714 14.9201 5.39922 14.7604 5.2395C14.6007 5.07978 14.4027 4.99992 14.1666 4.99992H11.6666V3.33325H14.1666C14.8611 3.33325 15.4513 3.57631 15.9375 4.06242C16.4236 4.54853 16.6666 5.13881 16.6666 5.83325V7.49992C16.6666 7.73603 16.7465 7.93395 16.9062 8.09367C17.0659 8.25339 17.2638 8.33325 17.5 8.33325H18.3333V11.6666H17.5C17.2638 11.6666 17.0659 11.7464 16.9062 11.9062C16.7465 12.0659 16.6666 12.2638 16.6666 12.4999V14.1666C16.6666 14.861 16.4236 15.4513 15.9375 15.9374C15.4513 16.4235 14.8611 16.6666 14.1666 16.6666H11.6666ZM5.83331 16.6666C5.13887 16.6666 4.54859 16.4235 4.06248 15.9374C3.57637 15.4513 3.33331 14.861 3.33331 14.1666V12.4999C3.33331 12.2638 3.25345 12.0659 3.09373 11.9062C2.93401 11.7464 2.73609 11.6666 2.49998 11.6666H1.66665V8.33325H2.49998C2.73609 8.33325 2.93401 8.25339 3.09373 8.09367C3.25345 7.93395 3.33331 7.73603 3.33331 7.49992V5.83325C3.33331 5.13881 3.57637 4.54853 4.06248 4.06242C4.54859 3.57631 5.13887 3.33325 5.83331 3.33325H8.33331V4.99992H5.83331C5.5972 4.99992 5.39929 5.07978 5.23956 5.2395C5.07984 5.39922 4.99998 5.59714 4.99998 5.83325V7.49992C4.99998 8.0277 4.84720 8.50686 4.54165 8.93742C4.23609 9.36797 3.83331 9.67353 3.33331 9.85408V10.1458C3.83331 10.3263 4.23609 10.6319 4.54165 11.0624C4.84720 11.493 4.99998 11.9721 4.99998 12.4999V14.1666C4.99998 14.4027 5.07984 14.6006 5.23956 14.7603C5.39929 14.9201 5.5972 14.9999 5.83331 14.9999H8.33331V16.6666H5.83331Z"/></svg><span class="seg-label">JSON</span></button>
+        </div>
+        <div class="toolbar-right">
+          <!-- Credit usage — VUI ProjectParseTab.tsx:471-479 ("Last run · N credits") -->
+          <span class="credits" id="credits" hidden></span>
+          <div class="divider" id="creditsdiv" hidden></div>
+          <div class="toolbar-group">
+            <!-- Download / Copy — VUI ProjectParseTab.tsx:495-517 -->
+            <button class="icon-btn" id="download" aria-label="Download" title="Download"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.17 14.17v.83a2.5 2.5 0 0 0 2.5 2.5h6.67a2.5 2.5 0 0 0 2.5-2.5v-.83"/><path d="M6.67 10L10 13.33 13.33 10"/><path d="M10 3.33v10"/></svg></button>
+            <button class="icon-btn" id="copy" aria-label="Copy" title="Copy">
+              <svg class="i ic-copy" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.58 13.75a2.23 2.23 0 0 1-.91-1.81V3.96c0-.93.67-1.7 1.49-1.7h7.41c.56 0 .86.33 1.11.85"/><rect x="6.25" y="5.42" width="10.42" height="12.08" rx="1.67"/></svg>
+              <svg class="i ic-check" viewBox="0 0 256 256" fill="currentColor" style="display:none"><path d="m229.66 77.66-128 128a8 8 0 0 1-11.32 0l-56-56a8 8 0 0 1 11.32-11.32L96 188.69 218.34 66.34a8 8 0 0 1 11.32 11.32Z"/></svg>
+            </button>
+            <div id="eyewrap">
+              <!-- Eye display settings — VUI DisplaySettingsDropdown.tsx:80-119 -->
+              <button class="icon-btn" id="eyebtn" aria-label="Display settings" title="Display settings"><svg class="i" viewBox="0 0 256 256" fill="currentColor"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z"/></svg></button>
+              <div id="eyepop">
+                <div class="section">Grounding</div>
+                <div class="row">
+                  <div class="grow">
+                    <span class="title">Always show fine-grained grounding</span>
+                    <span class="desc">Show all grounding highlights at once. When off, they appear on hover or click.</span>
+                  </div>
+                  <button class="switch" id="fineswitch" role="switch" aria-checked="false" aria-label="Toggle always show fine-grained grounding"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="divider" id="modeldiv" hidden></div>
+          <!-- Model chip — Figma CLI-Viewer-UI node 130:357 (results-pane
+               inner header, far right after a divider): icon/core/model +
+               the model family ("DPT-3 Pro"); the full resolved version
+               with its date pin shows on hover. -->
+          <span class="model-chip" id="modelchip" hidden>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.55467 2.71002C8.35507 2.59478 8.10915 2.59478 7.90954 2.71002L3.87528 5.03921L8.24154 7.49523L12.7285 5.11978L8.55467 2.71002ZM13.174 6.34386L8.8773 8.61857V13.564L12.8514 11.2696C13.051 11.1543 13.174 10.9413 13.174 10.7109V6.34386ZM7.58704 13.5641V8.60745L3.29026 6.19051V10.7109C3.29026 10.9413 3.41322 11.1543 3.61282 11.2696L7.58704 13.5641ZM7.26441 1.59263C7.86322 1.24691 8.60099 1.24691 9.1998 1.59263L13.4965 4.07334C14.0953 4.41906 14.4642 5.05799 14.4642 5.74943V10.7109C14.4642 11.4023 14.0953 12.0412 13.4965 12.387L9.1998 14.8677C8.60099 15.2134 7.86322 15.2134 7.26441 14.8677L2.96769 12.387C2.36888 12.0412 2 11.4023 2 10.7109V5.74943C2 5.05799 2.36888 4.41906 2.96769 4.07334L7.26441 1.59263Z" fill="#1A1916"/></svg>
+            <span class="model-label" id="modellabel"></span>
+          </span>
+        </div>
+      </div>
+      <div id="content"></div>
+      <pre id="jsonview"></pre>
+    </div>
+    <div id="extract"></div>
+  </section>
+</main>
+</div><!-- /appcol -->
+
+<script id="ade-data" type="application/json">__ADE_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("ade-data").textContent);
+const ELS = DATA.elements;
+const byId = new Map(ELS.map(e => [e.id, e]));
+const parentOf = new Map();
+for (const e of ELS) if (e.cells) for (const c of e.cells) parentOf.set(c, e.id);
+const parentId = id => {
+  const r = id.match(/^(.*)-r\d+$/);
+  return r ? r[1] : (parentOf.get(id) || null);
+};
+const topLevel = ELS.filter(e => e.type !== "table_cell");
+const ordinal = new Map(topLevel.map((e, i) => [e.id, i + 1]));
+
+// Element colors — VUI doc-extraction-app/utils.ts:25-45 (colorMap), verbatim
+// including the non-element aliases; fallback = text.
+const COLORS = {
+  title: "#7A5AF8", page_header: "#7A5AF8", page_number: "#7A5AF8",
+  page_footer: "#7A5AF8", marginalia: "#7A5AF8", key_value: "#DC6803",
+  table: "#2193FD", tableCell: "#2193FD", table_cell: "#2193FD", td: "#2193FD",
+  figure: "#FF5CFF", text: "#32D583", form: "#EAAA08", logo: "#F63D68",
+  card: "#DC6803", attestation: "#05DEDE", scan_code: "#EAAA08",
+};
+const color = t => COLORS[t] || COLORS.text;
+
+// sliceByCodePoints — VUI dpt3.ts:392-401: native slice unless the string
+// contains a high surrogate, then slice real code points.
+const HIGH_SURROGATE = /[\uD800-\uDBFF]/;
+function cpSlice(str, start, end) {
+  if (!HIGH_SURROGATE.test(str)) return str.slice(start, end);
+  return Array.from(str).slice(start, end).join("");
+}
+
+const el = (tag, cls, parent) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (parent) parent.appendChild(n);
+  return n;
+};
+
+/* ── Mini markdown renderer.
+   VUI renders element slices through react-markdown with preprocessMarkdown
+   (MemoizedReactMarkdown.tsx:193-218), remarkGfm + remarkMath(no single $)
+   (:265), rehypeRaw + rehypeSanitize(GitHub schema + span) (:267-270).
+   This static replica implements the observable behavior for DPT-3 output:
+   preprocess steps 2-5 verbatim; block parse for headings/bullet lists/
+   paragraphs (top-level ordered lists cannot occur — preprocess step 3
+   injects a zero-width space exactly so "1. " stays literal text); inline
+   bold/code/links; raw-HTML sanitize that keeps GitHub-allowlisted tags
+   (figure, br, sub, sup, em, strong...) and unwraps unknown tags to their
+   text (so <description> vanishes but its text stays), dropping comments —
+   matching the rehypeRaw+sanitize outcome described in
+   MemoizedReactMarkdown.tsx:35-42. */
+/* ── shared-md-renderer:begin — this block is duplicated verbatim in
+   view_template.html and crop_template.html (each artifact must stay a
+   self-contained single file); edit both copies together —
+   tests/test_templates.py enforces byte-identity ── */
+function preprocessMarkdown(src) {
+  let s = src;
+  // step 2 — normalize "1.  " → "1. " (MemoizedReactMarkdown.tsx:204)
+  s = s.replace(/^(\d+)([.)])\s{2,}/gm, "$1$2 ");
+  // step 3 — zero-width space stops top-level <ol> promotion (:207-210)
+  s = s.replace(/^(\d+)([.)]) /gm, "$1$2​ ");
+  // step 4 — bold nested numbering (:212-214)
+  s = s.replace(/^(\d+\.\d+(\.\d+)*)(\.​)?\s+/gm, "**$1** ");
+  // step 5 — strip 4+ leading spaces so nothing becomes an indented code block (:216)
+  s = s.replace(/^\s{4,}/gm, "");
+  return s;
+}
+
+// Sanitize raw HTML the way rehypeRaw+rehypeSanitize does: allowlisted tags
+// survive, unknown tags are unwrapped to their children, comments dropped.
+const ALLOWED_TAGS = new Set(["figure", "br", "sub", "sup", "em", "strong", "b", "i",
+  "u", "s", "p", "ul", "ol", "li", "blockquote", "code", "pre", "span", "table",
+  "thead", "tbody", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "hr"]);
+function sanitizeInto(sourceNode, target) {
+  for (const node of sourceNode.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.appendChild(renderInline(node.textContent));
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = node.tagName.toLowerCase();
+      if (ALLOWED_TAGS.has(tag)) {
+        const clone = document.createElement(tag);
+        target.appendChild(clone);
+        sanitizeInto(node, clone);
+      } else {
+        sanitizeInto(node, target); // unwrap: keep children, drop the tag
+      }
+    } // comments and everything else: dropped (rehype-sanitize default)
+  }
+}
+
+// Inline markdown: **bold**, `code`, [text](href). Applied to text nodes only.
+function renderInline(text) {
+  const frag = document.createDocumentFragment();
+  const rx = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  let last = 0, m;
+  while ((m = rx.exec(text)) !== null) {
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    if (m[1] !== undefined) el("strong", "", frag).textContent = m[1];
+    else if (m[2] !== undefined) el("code", "", frag).textContent = m[2];
+    else if (/^(https?:|mailto:)/i.test(m[4])) {
+      const a = el("a", "", frag);
+      a.textContent = m[3];
+      a.href = m[4];
+      a.target = "_blank";
+      a.rel = "noreferrer noopener"; // VUI MemoizedReactMarkdown.tsx:319-325
+    } else {
+      // javascript:/data:/relative targets stay plain text — a shared
+      // artifact must not carry clickable script vectors.
+      frag.append(m[3]);
+    }
+    last = rx.lastIndex;
+  }
+  frag.append(text.slice(last));
+  return frag;
+}
+
+function renderMarkdown(src, target) {
+  const text = preprocessMarkdown(src);
+  // Blocks split on blank lines; heading and bullet-list lines get structure,
+  // everything else is a whitespace-pre-line paragraph (VUI p override :276).
+  for (const block of text.split(/\n{2,}/)) {
+    if (!block.trim()) continue;
+    const hasHtml = /<[a-zA-Z!/]/.test(block);
+    if (hasHtml) {
+      // Raw-HTML path (figure/description/br/tables-in-markdown). A <div>
+      // host, not <p>: block-level tags inside a <p> would make the browser
+      // silently restructure the DOM.
+      const scratch = document.implementation.createHTMLDocument("").body;
+      scratch.innerHTML = block;
+      const host = el("div", "rawhtml", target);
+      sanitizeInto(scratch, host);
+      continue;
+    }
+    const h = block.match(/^(#{1,6}) +(.*)$/s);
+    if (h) {
+      el("h" + h[1].length, "", target).appendChild(renderInline(h[2].replace(/\n/g, " ")));
+      continue;
+    }
+    if (/^[-*] /m.test(block)) {
+      const ul = el("ul", "", target);
+      for (const line of block.split("\n")) {
+        el("li", "", ul).appendChild(renderInline(line.replace(/^[-*] /, "")));
+      }
+      continue;
+    }
+    el("p", "", target).appendChild(renderInline(block));
+  }
+}
+/* ── shared-md-renderer:end ── */
+
+/* ── Header: filename, pagination, workflow pills ─────────────────────── */
+(function header() {
+  document.getElementById("docname").textContent =
+    DATA.receipt.source_name || DATA.receipt.job_item_id;
+  document.title = "ade view — " + (DATA.receipt.source_name || DATA.receipt.job_item_id);
+  if (DATA.note) {
+    const banner = document.getElementById("notebanner");
+    banner.hidden = false;
+    banner.textContent = DATA.note;
+  }
+  // Workflow pills — Parse always; Extract only when the store holds
+  // extractions (user decision; VUI gates pills on enabledTools,
+  // ProjectHeader.tsx:564-610).
+  const pills = document.getElementById("pills");
+  const mk = (label, iconPath, tab, active) => {
+    const b = el("button", "pill" + (active ? " active" : ""), pills);
+    b.dataset.tab = tab;
+    const ic = el("span", "pill-icon", b);
+    ic.innerHTML = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + iconPath + '"/></svg>';
+    el("span", "pill-label", b).textContent = label;
+    b.onclick = () => switchTab(tab);
+  };
+  // IconFileParse / IconFileExtract paths — VUI Icons.tsx:3038-3078
+  mk("Parse", "M8 3H7.8C6.11984 3 5.27976 3 4.63803 3.32698C4.07354 3.6146 3.6146 4.07354 3.32698 4.63803C3 5.27976 3 6.11984 3 7.8V8M8 21H7.8C6.11984 21 5.27976 21 4.63803 20.673C4.07354 20.3854 3.6146 19.9265 3.32698 19.362C3 18.7202 3 17.8802 3 16.2V16M21 8V7.8C21 6.11984 21 5.27976 20.673 4.63803C20.3854 4.07354 19.9265 3.6146 19.362 3.32698C18.7202 3 17.8802 3 16.2 3H16M21 16V16.2C21 17.8802 21 18.7202 20.673 19.362C20.3854 19.9265 19.9265 20.3854 19.362 20.673C18.7202 21 17.8802 21 16.2 21H16M3 12H3.01M7.5 12H7.51M16.5 12H16.51M12 12H12.01M21 12H21.01", "parse", true);
+  if ((DATA.extractions || []).length) {
+    el("span", "connector", pills);
+    mk("Extract", "M14 11H8M10 15H8M16 7H8M20 10.5V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22H11.5M22 22L20.5 20.5M21.5 18C21.5 19.933 19.933 21.5 18 21.5C16.067 21.5 14.5 19.933 14.5 18C14.5 16.067 16.067 14.5 18 14.5C19.933 14.5 21.5 16.067 21.5 18Z", "extract", false);
+  }
+})();
+
+function positionPills() {
+  // VUI client.tsx:435-437 — pills sit at the doc-pane width.
+  const docWidth =
+    document.getElementById("docpane").getBoundingClientRect().width;
+  document.getElementById("pills").style.left = docWidth + "px";
+  // Page navigator — Figma 46:1096: right-aligned inside the doc pane's
+  // header, 16px from the pane's right edge.
+  const pagination = document.getElementById("pagination");
+  pagination.style.left =
+    Math.max(0, docWidth - 16 - pagination.offsetWidth) + "px";
+}
+// Reposition on ANY doc-pane width change — the sidebar appearing after
+// history.js loads, sash drags, window resizes. The initial-load call
+// alone measured the pane before the sidebar unhid and stuck the
+// navigator ~260px off until the next sash drag.
+new ResizeObserver(positionPills).observe(document.getElementById("docpane"));
+
+function switchTab(tab) {
+  document.querySelectorAll(".pill").forEach(p =>
+    p.classList.toggle("active", p.dataset.tab === tab));
+  document.getElementById("parse-tab").style.display = tab === "parse" ? "flex" : "none";
+  document.getElementById("extract").style.display = tab === "extract" ? "flex" : "none";
+  if (tab === "extract" && !shownExtract && (DATA.extractions || []).length) {
+    buildExtract(DATA.extractions[0].job_item_id);
+  }
+  if (tab === "parse") setLayer(null); // evidence layer belongs to the extract tab
+  else if (shownExtract) setLayer(shownExtract);
+}
+
+/* ── Split panes: drag the sash; VUI Allotment defaults 33% / 300 / 400 ── */
+(function sash() {
+  const sash = document.getElementById("sash");
+  const doc = document.getElementById("docpane");
+  sash.addEventListener("pointerdown", down => {
+    down.preventDefault();
+    sash.setPointerCapture(down.pointerId);
+    document.body.classList.add("resizing");
+    const move = ev => {
+      const total = document.querySelector("main").getBoundingClientRect();
+      const width = Math.min(Math.max(ev.clientX - total.left, 300), total.width - 400);
+      doc.style.width = width + "px";
+      positionPills();
+    };
+    const up = () => {
+      document.body.classList.remove("resizing");
+      sash.removeEventListener("pointermove", move);
+      sash.removeEventListener("pointerup", up);
+    };
+    sash.addEventListener("pointermove", move);
+    sash.addEventListener("pointerup", up);
+  });
+  window.addEventListener("resize", positionPills);
+})();
+
+/* ── Document pane: page stack + overlay ─────────────────────────────── */
+function boxNode(id, type, box, cls, label) {
+  const b = el("div", "box " + (cls || ""));
+  b.dataset.id = id;
+  b.dataset.type = type;
+  b.style.setProperty("--c", color(type));
+  b.style.left = box.xmin * 100 + "%";
+  b.style.top = box.ymin * 100 + "%";
+  b.style.width = (box.xmax - box.xmin) * 100 + "%";
+  b.style.height = (box.ymax - box.ymin) * 100 + "%";
+  if (label) el("span", "boxlabel", b).textContent = label;
+  return b;
+}
+
+(function pages() {
+  const pane = document.getElementById("pages");
+  // Lazy page imagery: view.html embeds only the head pages; every other
+  // page loads on demand from pages-N.js sidecar chunks in the store (a
+  // JSONP include — the same file:// trick as history.js). Light extract
+  // viewers embed nothing and borrow every chunk from their parse item,
+  // so a document's imagery is stored once however many extractions cite
+  // it. A chunk the background builder hasn't rendered yet retries with a
+  // cache-buster; one that never appears degrades to an honest notice.
+  const deferred = new Map(); // page number -> placeholder node
+  const chunks = (DATA.page_chunks || []).map(c => ({ ...c, state: "idle", tries: 0 }));
+  const chunkOfPage = new Map();
+  for (const chunk of chunks) for (const p of chunk.pages) chunkOfPage.set(p, chunk);
+  const RETRY_MS = 5000, MAX_TRIES = 24; // ~2min: covers a long background render
+  // When the borrow fails, say WHAT broke, WHY it usually happens, and HOW
+  // to fix it — a banner for the story, short per-page placeholders.
+  const imageryNotice = (text) => {
+    const banner = document.getElementById("notebanner");
+    banner.textContent = banner.textContent
+      ? banner.textContent + "  ·  " + text : text;
+    banner.hidden = false;
+  };
+  let noticeShown = false;
+  const chunkFailed = (chunk) => {
+    chunk.state = "failed";
+    for (const num of chunk.pages) {
+      const placeholder = deferred.get(num);
+      if (!placeholder) continue;
+      placeholder.textContent =
+        "page " + num + " — image unavailable (see the notice above)";
+      deferred.delete(num);
+    }
+    if (noticeShown) return;
+    noticeShown = true;
+    imageryNotice(DATA.kind === "extract"
+      ? "Page images unavailable: this extract viewer keeps no images of " +
+        "its own — it loads them from its parse job item (" + chunk.src +
+        "), which could not be loaded. This usually means " +
+        "the file was opened outside its ~/.ade/jobs/" + DATA.job_item_id +
+        "/ folder (images don't travel with a copied file), or the parse " +
+        "job item was deleted. To fix: open the viewer from its original " +
+        "store location, or re-run `ade view " + DATA.job_item_id +
+        "` to re-render the imagery. To share a viewer with images " +
+        "included, share the parse job item's view.html instead. " +
+        "Extraction results, markdown, and box data below are unaffected."
+      : "Some page images could not be loaded (" + chunk.src + "). Pages " +
+        "beyond the embedded head load from sidecar files in the store, " +
+        "so this usually means the file was opened outside its " +
+        "~/.ade/jobs/ folder, or the imagery hasn't rendered yet. Re-run " +
+        "`ade view " + DATA.job_item_id + "` with the source present to " +
+        "re-render it. Markdown, elements, and box data are unaffected.");
+  };
+  const fillFromStore = (chunk) => {
+    const imagery = (window.__ADE_PAGES__ || {})[DATA.pages_key] || {};
+    for (const num of chunk.pages) {
+      const placeholder = deferred.get(num);
+      if (!placeholder) continue;
+      const data = imagery[String(num)];
+      if (!data || !data.data_uri) {
+        // The chunk loaded but skipped this page (absent from the source).
+        placeholder.textContent = "page " + num + " — no image in the sidecar";
+        deferred.delete(num);
+        continue;
+      }
+      const img = document.createElement("img");
+      img.src = data.data_uri;
+      img.width = data.width;
+      img.height = data.height;
+      img.alt = "page-" + num;
+      placeholder.replaceWith(img);
+      deferred.delete(num);
+    }
+  };
+  const loadChunk = (chunk) => {
+    if (!chunk || chunk.state !== "idle") return;
+    chunk.state = "loading";
+    const attempt = () => {
+      const tag = document.createElement("script");
+      // Cache-buster: the background builder may have just written the
+      // file; file:// resolution ignores the query, the cache key doesn't.
+      tag.src = chunk.src + "?t=" + Date.now();
+      tag.addEventListener("load", () => {
+        tag.remove();
+        chunk.state = "done";
+        fillFromStore(chunk);
+      });
+      tag.addEventListener("error", () => {
+        tag.remove();
+        chunk.tries++;
+        if (chunk.tries >= MAX_TRIES) { chunkFailed(chunk); return; }
+        setTimeout(attempt, RETRY_MS); // likely still rendering; keep waiting
+      });
+      document.body.appendChild(tag);
+    };
+    attempt();
+  };
+  for (const p of DATA.pages) {
+    const page = el("div", "page", pane);
+    page.dataset.page = p.page;
+    if (p.image) {
+      const img = el("img", "", page);
+      img.src = p.image;
+      img.width = p.width;
+      img.height = p.height;
+      img.alt = "page-" + p.page;
+    } else if (chunkOfPage.has(p.page) && p.status !== "failed") {
+      const placeholder = el("div", "placeholder", page);
+      placeholder.textContent = "page " + p.page + " — loading imagery…";
+      deferred.set(p.page, placeholder);
+    } else {
+      el("div", "placeholder", page).textContent =
+        "page " + p.page + (p.status === "failed" ? " — failed to parse"
+          : " — source unavailable (boxes approximate)");
+    }
+    for (const e of ELS) {
+      if (e.page !== p.page) continue;
+      const label = ordinal.has(e.id) ? ordinal.get(e.id) + "." + e.type : e.type;
+      if (e.type === "table_cell") {
+        page.appendChild(boxNode(e.id, e.type, e.box, "sub cell", label));
+      } else {
+        page.appendChild(boxNode(e.id, e.type, e.box, "", label));
+        // Region sub-boxes only when the model split finer than the element —
+        // VUI DocExtractionAnnotationsDpt3 gates on parts.length >= 2.
+        if ((e.atomic_grounding || []).length >= 2) {
+          e.atomic_grounding.forEach((g, i) =>
+            page.appendChild(boxNode(e.id + "-r" + i, e.type, g.box, "sub part")));
+        }
+      }
+    }
+  }
+  // Scroll-triggered loading: a chunk fetches when any of its pages nears
+  // the viewport (generous margin so scrolling rarely waits); page jumps
+  // land inside the margin, so deep links and the page navigator trigger
+  // it too. No IntersectionObserver (ancient embed) → load everything.
+  if (deferred.size) {
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          loadChunk(chunkOfPage.get(Number(entry.target.dataset.page)));
+          io.unobserve(entry.target);
+        }
+      }, { root: pane, rootMargin: "1500px 0px" });
+      for (const num of deferred.keys()) {
+        const node = pane.querySelector(`.page[data-page="${num}"]`);
+        if (node) io.observe(node);
+      }
+    } else {
+      for (const chunk of chunks) loadChunk(chunk);
+    }
+  }
+  // Pagination state: the current page is the one with the largest
+  // visible height in the pane. (The old IntersectionObserver at
+  // threshold 0.4 marked ANY ≥40%-visible page current, last entry
+  // winning — with a narrow pane several short pages qualify at once and
+  // the bottom one sticks: "3/3" while reading page 2.) Ties keep the
+  // earlier page.
+  const pageEls = [...pane.querySelectorAll(".page")];
+  const pagination = document.getElementById("pagination");
+  if (pageEls.length) {
+    pagination.hidden = false;
+    document.getElementById("totalpages").textContent = String(pageEls.length);
+  }
+  let current = 0; // index into pageEls
+  const setCurrent = idx => {
+    current = idx;
+    document.getElementById("curpage").textContent = String(idx + 1);
+    document.getElementById("prevpage").disabled = idx <= 0;
+    document.getElementById("nextpage").disabled = idx >= pageEls.length - 1;
+  };
+  setCurrent(0);
+  const updateCurrent = () => {
+    const paneRect = pane.getBoundingClientRect();
+    let best = 0, bestVisible = -1;
+    pageEls.forEach((page, i) => {
+      const r = page.getBoundingClientRect();
+      const visible = Math.max(
+        0,
+        Math.min(r.bottom, paneRect.bottom) - Math.max(r.top, paneRect.top),
+      );
+      if (visible > bestVisible + 1) { // +1: ties keep the earlier page
+        bestVisible = visible;
+        best = i;
+      }
+    });
+    setCurrent(best);
+  };
+  // Timer-throttled (not rAF — rAF never fires in hidden/backgrounded
+  // tabs and would freeze the counter): at most one rect sweep per 80ms
+  // trailing window keeps rapid scrolling jank-free on page-heavy docs.
+  let sweepTimer = null;
+  pane.addEventListener("scroll", () => {
+    if (sweepTimer !== null) return;
+    sweepTimer = setTimeout(() => { sweepTimer = null; updateCurrent(); }, 80);
+  }, { passive: true });
+  window.addEventListener("resize", updateCurrent);
+  updateCurrent();
+  document.getElementById("prevpage").onclick = () =>
+    pageEls[current - 1]?.scrollIntoView({ behavior: "smooth" });
+  document.getElementById("nextpage").onclick = () =>
+    pageEls[current + 1]?.scrollIntoView({ behavior: "smooth" });
+})();
+
+/* ── Markdown pane: the post-fix render cascade ──────────────────────────
+   VUI Dpt3ChunksMarkdown.tsx:337-532 (2026-07-15 highlight fix): per
+   top-level element — table → HTML table; NOT table + no children +
+   parts>=2 → ONE <p whitespace-pre-line> of plain-text spans tiled by
+   parts (tileElementSpanByParts, dpt3.ts:502-549); else markdown render. */
+function tileByParts(e) {
+  const parts = (e.atomic_grounding || [])
+    .map((g, i) => ({ start: g.range.start, end: g.range.end, i }))
+    .sort((a, b) => a.start - b.start);
+  const base = e.span[0], end = e.span[1];
+  const segments = [];
+  let cursor = base;
+  for (const part of parts) {
+    const s = Math.max(part.start, cursor), pe = Math.min(part.end, end);
+    if (s >= pe) continue; // fully covered by an earlier part (dpt3.ts:534-546)
+    if (s > cursor) segments.push({ text: cpSlice(DATA.markdown, cursor, s) });
+    segments.push({ text: cpSlice(DATA.markdown, s, pe), id: e.id + "-r" + part.i });
+    cursor = pe;
+  }
+  if (cursor < end) segments.push({ text: cpSlice(DATA.markdown, cursor, end) });
+  return segments;
+}
+
+// buildDpt3TableHtml equivalent — dpt3.ts:645-692: group by row, sort by
+// col, colspan/rowspan only when > 1, cell text trimmed. (Cell ids deviate:
+// see header note.) DOM building makes the escaping rules of
+// escapeDpt3CellText (dpt3.ts:592-612) moot — textContent never parses HTML.
+function tableBody(e, parent) {
+  const cells = (e.cells || []).map(id => byId.get(id)).filter(Boolean);
+  const table = el("table", "cells", parent);
+  table.dataset.id = e.id;
+  const rows = new Map();
+  cells.forEach((c, idx) => {
+    const r = c.row ?? idx;
+    if (!rows.has(r)) rows.set(r, []);
+    rows.get(r).push(c);
+  });
+  for (const rowIdx of [...rows.keys()].sort((a, b) => a - b)) {
+    const tr = el("tr", "", table);
+    for (const c of rows.get(rowIdx).sort((a, b) => (a.col ?? 0) - (b.col ?? 0))) {
+      const td = el("td", "", tr);
+      td.textContent = c.text.trim();
+      if (!c.text.trim()) td.innerHTML = "&nbsp;"; // VUI MemoizedReactMarkdown td: empty → nbsp
+      td.dataset.id = c.id;
+      td.dataset.type = c.type;
+      td.id = "md-" + c.id;
+      if (c.colspan > 1) td.colSpan = c.colspan;
+      if (c.rowspan > 1) td.rowSpan = c.rowspan;
+    }
+  }
+}
+
+(function markdown() {
+  const pane = document.getElementById("content");
+  // Bring-your-own-markdown items have no elements to tile — the pane
+  // renders the input markdown whole (proposal: "markdown pane alone").
+  if (DATA.kind === "markdown" && DATA.markdown) {
+    renderMarkdown(DATA.markdown, el("div", "mdwhole", pane));
+    return;
+  }
+  let prevPage = null;
+  let first = true;
+  for (const row of DATA.rows) {
+    // Inter-element markdown (page-break comments, the doc_id trailer) is
+    // not rendered — VUI's rows are elements only (Dpt3ChunksMarkdown.tsx:
+    // 169-206); the data still tiles the whole markdown for consumers.
+    if (row.gap !== undefined) continue;
+    const e = ELS[row.el];
+    // Page separator when the page changes — Dpt3ChunksMarkdown.tsx:267-269
+    if (!first && e.page !== prevPage) el("hr", "pagesep", pane);
+    prevPage = e.page;
+    first = false;
+    const div = el("div", "mdrow", pane);
+    div.dataset.id = e.id;
+    div.dataset.type = e.type;
+    div.id = "md-" + e.id;
+    div.style.setProperty("--c", color(e.type));
+    // Floating label `${ordinal} - ${type}`, CSS-capitalized —
+    // Dpt3ChunksMarkdown.tsx:297-315
+    el("div", "mdlabel", div).textContent = ordinal.get(e.id) + " - " + e.type;
+    if (e.type === "table") {
+      tableBody(e, div);
+    } else if (!e.cells && (e.atomic_grounding || []).length >= 2) {
+      const p = el("p", "regions", div);
+      for (const seg of tileByParts(e)) {
+        const span = el("span", seg.id ? "region" : "", p);
+        span.textContent = seg.text; // plain text by design (the fix's tradeoff)
+        if (seg.id) {
+          span.dataset.id = seg.id;
+          span.dataset.type = e.type;
+          span.style.setProperty("--c", color(e.type));
+          span.id = "md-" + seg.id;
+        }
+      }
+    } else {
+      const body = el("div", "mdbody", div);
+      body.dataset.id = e.id;
+      body.dataset.type = e.type;
+      renderMarkdown(e.text, body);
+    }
+  }
+})();
+
+/* ── JSON view — raw response, pretty-printed (Dpt3RawJsonView.tsx:106),
+   Monaco "vs" token colors, and each top-level element's object wrapped as
+   an interactive block — the static equivalent of the chunk-highlight
+   overlay Dpt3RawJsonView builds from `"id"` declarations
+   (buildDpt3Blocks, Dpt3RawJsonView.tsx:397-459). */
+let jsonRendered = false;
+function renderJson() {
+  if (jsonRendered) return;
+  jsonRendered = true;
+  const out = document.getElementById("jsonview");
+  const pad = n => " ".repeat(n);
+  // `base` = the indent column a jblock starts at: inside the inline-block,
+  // padding is written relative to it so the box's own x-offset isn't
+  // double-counted.
+  function write(value, indent, target, base) {
+    if (value === null || typeof value === "boolean") {
+      el("span", "j-lit", target).textContent = JSON.stringify(value);
+    } else if (typeof value === "number") {
+      el("span", "j-num", target).textContent = JSON.stringify(value);
+    } else if (typeof value === "string") {
+      el("span", "j-str", target).textContent = JSON.stringify(value);
+    } else if (Array.isArray(value)) {
+      if (!value.length) { target.append("[]"); return; }
+      target.append("[\n");
+      value.forEach((item, i) => {
+        target.append(pad(indent + 2 - base));
+        write(item, indent + 2, target, base);
+        target.append((i < value.length - 1 ? "," : "") + "\n");
+      });
+      target.append(pad(indent - base) + "]");
+    } else {
+      // Top-level element objects become hover/click blocks sharing the
+      // panes' id vocabulary (cells stay plain, like VUI's top-level-only
+      // block walk in buildDpt3Blocks).
+      let host = target;
+      let innerBase = base;
+      if (value.id && byId.has(value.id) && !parentOf.has(value.id)) {
+        host = el("span", "jblock", target);
+        host.dataset.id = value.id;
+        host.dataset.type = value.type;
+        host.style.setProperty("--c", color(value.type));
+        innerBase = indent;
+      }
+      const keys = Object.keys(value);
+      if (!keys.length) { host.append("{}"); return; }
+      host.append("{\n");
+      keys.forEach((key, i) => {
+        host.append(pad(indent + 2 - innerBase));
+        el("span", "j-key", host).textContent = JSON.stringify(key);
+        host.append(": ");
+        write(value[key], indent + 2, host, innerBase);
+        host.append((i < keys.length - 1 ? "," : "") + "\n");
+      });
+      host.append(pad(indent - innerBase) + "}");
+    }
+  }
+  write(DATA.raw_response, 0, out, 0);
+}
+
+/* ── Toolbar wiring ──────────────────────────────────────────────────── */
+(function toolbar() {
+  let format = "markdown"; // default — VUI ProjectParseTab.tsx:184
+  const content = document.getElementById("content");
+  const jsonview = document.getElementById("jsonview");
+  document.querySelectorAll("#formattoggle button").forEach(b => {
+    b.onclick = () => {
+      format = b.dataset.format;
+      document.querySelectorAll("#formattoggle button").forEach(x =>
+        x.classList.toggle("active", x === b));
+      content.style.display = format === "markdown" ? "block" : "none";
+      jsonview.style.display = format === "json" ? "block" : "none";
+      if (format === "json") renderJson();
+    };
+  });
+
+  // VUI shows "Last run · N credits" (ProjectParseTab.tsx:471-479) because a
+  // project accumulates runs; the CLI stores exactly one live parse, so the
+  // qualifier would mislead — the receipt is just the parse's billed credits.
+  const credits = DATA.receipt.billing && DATA.receipt.billing.total_credits;
+  if (credits != null) {
+    const span = document.getElementById("credits");
+    span.hidden = false;
+    document.getElementById("creditsdiv").hidden = false;
+    // Text nodes, not innerHTML — the value rides in from stored response
+    // data, and rendered store data never gets a markup path.
+    span.append(String(credits));
+    el("b", "", span).textContent = " credit" + (credits === 1 ? "" : "s");
+    span.title = "Billed by the live parse (" + (DATA.receipt.job_id || "") + ", " +
+      (DATA.receipt.billing.service_tier || "") + " tier)";
+  }
+
+  // Model chip (Figma 130:357): the family reads clean ("DPT-3 Pro"); the
+  // full resolved version with its date pin lives on hover.
+  const modelVersion = DATA.receipt.model_version;
+  if (modelVersion) {
+    const family = modelVersion.replace(/-\d{8}$/, "");
+    const MODEL_NAMES = { "dpt-3-pro": "DPT-3 Pro", "extract": "Extract" };
+    const chip = document.getElementById("modelchip");
+    chip.hidden = false;
+    document.getElementById("modeldiv").hidden = false;
+    document.getElementById("modellabel").textContent =
+      MODEL_NAMES[family] || family;
+    chip.title = modelVersion;
+  }
+
+  // getCode() — VUI ProjectParseTab.tsx:257-265: markdown string, or the
+  // raw response pretty-printed.
+  const getCode = () => format === "json"
+    ? JSON.stringify(DATA.raw_response, null, 2) : DATA.markdown;
+  const stem = (DATA.receipt.source_name || "parse-result").replace(/\.[^.]+$/, "");
+  document.getElementById("download").onclick = () => {
+    // downloadAsFile — VUI codeUtils.ts:55-79 (prompt for name, text blob).
+    const ext = format === "json" ? ".json" : ".md";
+    const name = window.prompt("Enter file name", stem + ".parse" + ext);
+    if (!name) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([getCode()], { type: "text/plain" }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  let copied = false;
+  const showCopied = () => {
+    copied = true;
+    const btn = document.getElementById("copy");
+    btn.querySelector(".ic-copy").style.display = "none";
+    btn.querySelector(".ic-check").style.display = "";
+    setTimeout(() => {
+      copied = false;
+      btn.querySelector(".ic-copy").style.display = "";
+      btn.querySelector(".ic-check").style.display = "none";
+    }, 2000);
+  };
+  document.getElementById("copy").onclick = () => {
+    if (copied) return; // VUI ProjectParseTab.tsx:512 (2s check swap)
+    const text = getCode();
+    const fallback = () => {
+      // Clipboard API needs a secure context and can be denied on file://;
+      // an off-screen textarea + execCommand still works there.
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (ok) showCopied();
+      else window.prompt("Copy the text below", text);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(showCopied, fallback);
+    } else {
+      fallback();
+    }
+  };
+
+  const eyebtn = document.getElementById("eyebtn");
+  const eyepop = document.getElementById("eyepop");
+  eyebtn.onclick = ev => { ev.stopPropagation(); eyepop.classList.toggle("open"); };
+  document.addEventListener("click", ev => {
+    if (!eyepop.contains(ev.target)) eyepop.classList.remove("open");
+  });
+  document.getElementById("fineswitch").onclick = function () {
+    const on = !this.classList.contains("on");
+    this.classList.toggle("on", on);
+    this.setAttribute("aria-checked", String(on));
+    document.body.classList.toggle("show-fine", on);
+  };
+})();
+
+/* ── Extract tab — the parse → extract → evidence story (issue #10).
+   Field→box references come precomputed from evidence.json (#8), the
+   CLI-side equivalent of VUI's mapDpt3ExtractionMetadataToChunkRefs
+   (dpt3.ts) + useGroundingMetadata bridge: extraction ranges and element
+   spans index the same markdown, so each quoted field carries the
+   element_ids/pages/boxes it overlaps. The viewer never re-joins —
+   see the reference map on issue #10. */
+// Escape ids before interpolating them into CSS selectors. Element ids
+// (<type>-<index>) and extract ids (hex) are contract-safe today, but
+// applyHash decodes arbitrary deep-link ids — CSS.escape keeps a stray
+// character from throwing a DOMException and breaking selection/overlays.
+const esc = s => CSS.escape(s);
+let activeLayer = null;
+function evidenceRefs(ex) {
+  // A stale extraction's evidence recomputes as kind=spans_only —
+  // its layer never draws boxes against the new parse's pages.
+  if (!ex.evidence || ex.evidence.kind !== "grounded") return [];
+  return [...new Set((ex.evidence.fields || []).flatMap(f => f.element_ids || []))];
+}
+
+function setLayer(extractId) {
+  if (activeLayer) {
+    const prev = (DATA.extractions || []).find(x => x.job_item_id === activeLayer);
+    evidenceRefs(prev || {}).forEach(id =>
+      document.querySelectorAll(`#pages .box[data-id="${esc(id)}"]`)
+        .forEach(n => n.classList.remove("evid")));
+  }
+  activeLayer = extractId;
+  if (!extractId) return;
+  const ex = (DATA.extractions || []).find(x => x.job_item_id === extractId);
+  evidenceRefs(ex || {}).forEach(id =>
+    document.querySelectorAll(`#pages .box[data-id="${esc(id)}"]`)
+      .forEach(n => n.classList.add("evid")));
+}
+
+// Token-colored JSON lines with a line→field-path map — the static
+// equivalent of ExtractedDataJSONView's pathMap walk (:209-259): leaf
+// `"key": value` lines map to dotted paths (arrays as [i], matching
+// evidence.py's field naming) and become hover/click targets.
+// Render a value as pretty JSON lines. Leaf lines carry a data-path built
+// the SAME way evidence.py's metadata_leaves does — object children append
+// ".key", array items append "[i]" (for items of ANY type, objects and
+// arrays included) — so extraction line paths match the evidence field
+// names byPath keys on. A recursive walk over the value guarantees that
+// parity (a text scan can't reliably recover array indices for object
+// items). `pathed` gates whether leaves are made interactive.
+function jsonLines(value, container, pathed) {
+  const rows = [];  // { text, path|null } per line
+  function walk(val, label, path, indent, trailing) {
+    const pad = "  ".repeat(indent);
+    const head = label !== null ? JSON.stringify(label) + ": " : "";
+    if (val === null || typeof val !== "object") {
+      rows.push({ text: pad + head + JSON.stringify(val) + trailing, path });
+    } else if (Array.isArray(val)) {
+      if (!val.length) { rows.push({ text: pad + head + "[]" + trailing, path: null }); return; }
+      rows.push({ text: pad + head + "[", path: null });
+      val.forEach((item, i) =>
+        walk(item, null, `${path}[${i}]`, indent + 1, i < val.length - 1 ? "," : ""));
+      rows.push({ text: pad + "]" + trailing, path: null });
+    } else {
+      const keys = Object.keys(val);
+      if (!keys.length) { rows.push({ text: pad + head + "{}" + trailing, path: null }); return; }
+      rows.push({ text: pad + head + "{", path: null });
+      keys.forEach((k, i) =>
+        walk(val[k], k, path === "" ? k : `${path}.${k}`, indent + 1, i < keys.length - 1 ? "," : ""));
+      rows.push({ text: pad + "}" + trailing, path: null });
+    }
+  }
+  walk(value, null, "", 0, "");
+  const rx = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|(true|false|null)/g;
+  for (const row of rows) {
+    const div = el("div", "ex-line", container);
+    if (pathed && row.path) div.dataset.path = row.path;
+    // token coloring (Monaco vs, as in the parse JSON tab)
+    let last = 0, m;
+    rx.lastIndex = 0;
+    while ((m = rx.exec(row.text)) !== null) {
+      div.append(row.text.slice(last, m.index));
+      if (m[1] !== undefined) el("span", m[2] ? "j-key" : "j-str", div).textContent = m[1] + (m[2] || "");
+      else if (m[3] !== undefined) el("span", "j-num", div).textContent = m[3];
+      else el("span", "j-lit", div).textContent = m[4];
+      last = rx.lastIndex;
+    }
+    div.append(row.text.slice(last));
+  }
+}
+
+// Type label + badge color per getTypeLabel/getTypeBadgeClasses
+// (SchemaTreeEditor.tsx:205-243): arrays read "Array of <Item>", colored
+// by the item type; numbers/integers share the Number badge.
+function typeBadge(spec) {
+  const display = spec.type === "array"
+    ? (spec.items && spec.items.type) || "object" : spec.type || "string";
+  const norm = display === "integer" ? "number" : display;
+  const label = norm.charAt(0).toUpperCase() + norm.slice(1);
+  return {
+    cls: "t-" + (["object", "string", "number", "boolean", "enum"].includes(norm) ? norm : "string"),
+    label: spec.type === "array" ? "Array of " + label : label,
+  };
+}
+
+function schemaTree(node, container, prefix) {
+  // Read-only SchemaTreeEditor rows (:462-486): name + colored type badge,
+  // description on its own truncated row; nested children indented (:337).
+  for (const [name, spec] of Object.entries((node && node.properties) || {})) {
+    const path = prefix ? prefix + "." + name : name;
+    const row = el("div", "sc-row", container);
+    row.dataset.spath = path;
+    const child = spec.type === "array" ? spec.items : spec;
+    const nested = !!(child && child.properties);
+    if (nested) {
+      const btn = el("button", "schevbtn", row);
+      btn.setAttribute("aria-label", "Toggle " + name);
+      btn.innerHTML = '<svg viewBox="0 0 12 12" fill="none"><path stroke-width="1.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M4.5 3L7.5 6L4.5 9"/></svg>';
+    }
+    const line = el("div", "srow1", row);
+    el("span", "sname", line).textContent = name;
+    const badge = typeBadge(spec);
+    el("span", "stype " + badge.cls, line).textContent = badge.label;
+    if (spec.description) {
+      const d = el("div", "sdesc", row);
+      d.textContent = spec.description;
+      d.title = spec.description;
+    }
+    if (nested) {
+      const kids = el("div", "sc-kids", container);
+      schemaTree(child, kids, path);
+      row.querySelector(".schevbtn").onclick = ev => {
+        ev.stopPropagation();
+        const closed = row.classList.toggle("closed");
+        kids.style.display = closed ? "none" : "";
+      };
+    }
+  }
+}
+
+let shownExtract = null;
+function buildExtract(extractId) {
+  shownExtract = extractId;
+  const ex = (DATA.extractions || []).find(x => x.job_item_id === extractId);
+  if (!ex) return;
+  const ev = ex.evidence || { kind: "spans_only", fields: [] };
+  const grounded = ev.kind === "grounded";
+  const byPath = new Map((ev.fields || []).map(f => [f.field, f]));
+  const pane = document.getElementById("extract");
+  pane.textContent = "";
+  const split = el("div", "ex-split", pane);
+
+  // Results LEFT — ProjectExtractionResults.tsx:65-125
+  const results = el("div", "ex-results", split);
+  const rhead = el("div", "ex-panel-head", results);
+  el("span", "ptitle", rhead).textContent = "Results";
+  // Partial-success signals (#118): an amber ⚠️ beside the title; hover
+  // shows the messages. Text nodes only — both strings ride in from
+  // stored response data.
+  if (ex.schema_violation_error || (ex.warnings || []).length) {
+    const warn = el("span", "ex-warn", rhead);
+    warn.append("⚠️");
+    const box = el("div", "ex-warn-box", el("div", "ex-warn-tip", warn));
+    if (ex.schema_violation_error) {
+      const line = el("div", "", box);
+      el("b", "", line).textContent = "Partial extraction: ";
+      line.append(ex.schema_violation_error);
+    }
+    for (const w of ex.warnings || []) {
+      const line = el("div", "", box);
+      el("b", "", line).textContent = "Warning: ";
+      line.append(w && typeof w.message === "string" ? w.message : JSON.stringify(w));
+    }
+  }
+  // Credit usage — same style and slot as the Parse toolbar's credits
+  // (.credits, right-aligned). Text nodes, not innerHTML: the value rides
+  // in from stored response data.
+  if (ex.credit_usage != null) {
+    const span = el("span", "credits", rhead);
+    span.append(String(ex.credit_usage));
+    el("b", "", span).textContent = " credit" + (ex.credit_usage === 1 ? "" : "s");
+  }
+  const rscroll = el("div", "ex-scroll", results);
+  const section = (parent, title, open) => {
+    const sec = el("div", "ex-section" + (open ? " open" : ""), parent);
+    const head = el("div", "ex-sec-head", sec);
+    el("span", "chev", head).textContent = "▶";
+    head.append(title);
+    head.onclick = () => sec.classList.toggle("open");
+    return el("pre", "ex-json ex-sec-body", sec);
+  };
+  // "Extraction", default open (ExtractedDataJSONView.tsx:195,491-535)
+  const extractionBody = section(rscroll, "Extraction", true);
+  jsonLines(ex.extraction, extractionBody, true);
+  for (const line of extractionBody.querySelectorAll(".ex-line[data-path]")) {
+    const field = byPath.get(line.dataset.path);
+    if (field && field.ungroundable) {
+      const label = el("span", "linelabel", line);
+      label.textContent = "ungroundable";
+      label.title = "Synthesised, not quoted — no spans, no visual evidence.";
+    } else if (field && field.empty) {
+      // Quiet by design (F5): an empty value has nothing to ground —
+      // expected for blank cells, distinct from ungroundable.
+      const label = el("span", "linelabel", line);
+      label.textContent = "empty";
+      label.title = "No value extracted — nothing to ground.";
+    }
+    const refs = grounded && field ? field.element_ids || [] : [];
+    // Highlight the field's schema row AND its ancestors — VUI's
+    // prefix-match isHighlighted (SchemaTreeEditor.tsx:311-315).
+    const schemaRows = () => {
+      const stripped = line.dataset.path.replace(/\[\d+\]/g, "");
+      return [...document.querySelectorAll(".sc-row")].filter(r =>
+        stripped === r.dataset.spath || stripped.startsWith(r.dataset.spath + "."));
+    };
+    line.onmouseenter = () => { refs.forEach(id => mark(id, "hov", true)); schemaRows().forEach(r => r.classList.add("hl")); };
+    line.onmouseleave = () => { refs.forEach(id => mark(id, "hov", false)); schemaRows().forEach(r => r.classList.remove("hl")); };
+    line.onclick = () => {
+      // Toggle: a literally-selected line clears the whole selection —
+      // the same dismiss gesture as a selected canvas box (VUI
+      // DocExtractionAnnotationsDpt3.tsx:242-251). VUI's Monaco JSON pane
+      // deliberately never toggles (ExtractedDataJSONView.tsx:336-346)
+      // because touch synthesizes duplicate mousedowns there; these are
+      // plain DOM click handlers, one per tap, so that hazard doesn't
+      // apply here.
+      if (line.classList.contains("sel")) {
+        select(null);
+        return;
+      }
+      focusField(extractId, line.dataset.path, { flash: false });
+    };
+  }
+  // "Extract Metadata", default closed (ExtractedDataJSONView.tsx:664-770)
+  jsonLines(ex.extraction_metadata || {}, section(rscroll, "Extract Metadata", false), false);
+
+  // Schema RIGHT — SchemaVersionSelector.tsx:69-210 header + tree body
+  const schema = el("div", "ex-schema", split);
+  const shead = el("div", "ex-panel-head", schema);
+  el("span", "ptitle", shead).textContent = "Schema";
+  if ((DATA.extractions || []).length > 1) {
+    const pick = el("select", "", shead);
+    for (const x of DATA.extractions) {
+      const opt = el("option", "", pick);
+      opt.value = x.job_item_id;
+      opt.textContent = x.job_item_id + (x.stale ? " (stale)" : "");
+      if (x.job_item_id === extractId) opt.selected = true;
+    }
+    pick.onchange = () => buildExtract(pick.value);
+  } else {
+    el("code", "", shead).textContent = ex.job_item_id;
+  }
+  if (ex.model) el("span", "badge", shead).textContent = ex.model;
+  if (ex.stale) {
+    const b = el("span", "badge stale", shead);
+    b.textContent = "stale — boxes withheld";
+    b.title = "Ran against an older parse: its spans index markdown that no longer exists, so no boxes are drawn against the new pages.";
+  } else if (!grounded) {
+    const b = el("span", "badge stale", shead);
+    b.textContent = "spans only — " + (ev.reason || "no grounding");
+  }
+  schemaTree(ex.schema || {}, el("div", "sc-tree ex-scroll", schema), "");
+
+  // Showing an extraction overlays all its grounded fields' boxes (#10).
+  setLayer(extractId);
+}
+
+function focusField(extractId, fieldName, opts = {}) {
+  // Build the target extraction BEFORE switching — switchTab auto-builds
+  // the first extraction when none is shown, which would build twice.
+  if (shownExtract !== extractId) buildExtract(extractId);
+  switchTab("extract");
+  const line = document.querySelector(
+    `#extract .ex-line[data-path="${CSS.escape(fieldName)}"]`);
+  if (!line) return;
+  document.querySelectorAll("#extract .ex-line.sel").forEach(n => n.classList.remove("sel"));
+  line.classList.add("sel");
+  line.scrollIntoView({ block: "center" });
+  const ex = (DATA.extractions || []).find(x => x.job_item_id === extractId);
+  const field = ((ex && ex.evidence && ex.evidence.fields) || [])
+    .find(f => f.field === fieldName);
+  const refs = (ex && ex.evidence && ex.evidence.kind === "grounded" && field
+    ? field.element_ids : null) || [];
+  // A field with no evidence (empty / ungroundable / spans-only) clears any
+  // element selection instead of leaving an unrelated box lit — VUI's
+  // selectedPath effect pushes [] chunk ids for such fields
+  // (ExtractedDataJSONView.tsx:393-397). fromField: this function owns the
+  // line highlight, so select() must not resync it.
+  if (refs.length) select(refs[0], { page: true, fromField: true });
+  else select(null, { fromField: true });
+  if (opts.flash) {
+    [line, ...refs.flatMap(id => [...document.querySelectorAll(`#pages .box[data-id="${esc(id)}"]`)])]
+      .forEach(n => {
+        n.classList.remove("flash");
+        void n.offsetWidth;
+        n.classList.add("flash");
+      });
+  }
+}
+
+/* ── Pane sync: hover / select / deep links ──────────────────────────── */
+const nodesFor = id => document.querySelectorAll(`[data-id="${esc(id)}"], #md-${esc(id)}`);
+function mark(id, cls, on) {
+  nodesFor(id).forEach(n => n.classList.toggle(cls, on));
+  // Descendant-aware: the parent element counts as selected/hovered when a
+  // cell or region of it is — VUI Dpt3ChunksMarkdown.tsx:249-257 and the
+  // overlay's matching startsWith check. Only the parent's own row/box gets
+  // the state (its other children stay unmarked).
+  const owner = parentId(id);
+  if (owner) {
+    const row = document.getElementById("md-" + owner);
+    if (row && row.classList.contains("mdrow")) row.classList.toggle(cls, on);
+    document.querySelectorAll(`#pages .box[data-id="${esc(owner)}"]`)
+      .forEach(n => n.classList.toggle(cls, on));
+  }
+}
+
+let selected = null;
+function select(id, opts = {}) {
+  if (selected) {
+    mark(selected, "sel", false);
+    document.querySelectorAll("#pages .box.sub.reveal").forEach(n => n.classList.remove("reveal"));
+  }
+  selected = id;
+  document.getElementById("clearsel").classList.toggle("on", !!id);
+  document.body.classList.toggle("has-selection", !!id);
+  if (!opts.fromField) syncFieldLines(id);
+  if (!id) return;
+  mark(id, "sel", true);
+  const owner = parentId(id) || id;
+  document.querySelectorAll(`#pages .box.sub[data-id^="${esc(owner)}-"]`)
+    .forEach(n => n.classList.add("reveal"));
+  const table = byId.get(owner);
+  if (table && table.cells) {
+    for (const c of table.cells)
+      document.querySelectorAll(`#pages .box[data-id="${esc(c)}"]`)
+        .forEach(n => n.classList.add("reveal"));
+  }
+  const scroll = node => node && node.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (opts.page) scroll(document.querySelector(`#pages [data-id="${esc(id)}"]`) ||
+    document.querySelector(`#pages [data-id="${esc(owner)}"]`));
+  if (opts.markdown) {
+    // Right-pane scroll targets whichever format is showing — VUI's JSON
+    // view centers the selected block the same way (revealLineInCenter).
+    const jsonPane = document.getElementById("jsonview");
+    if (jsonPane.style.display === "block") {
+      // Manual scrollTo: smooth scrollIntoView silently no-ops on inline
+      // spans taller than the scrollport (the multi-line element blocks).
+      const block = document.querySelector(`#jsonview [data-id="${esc(owner)}"]`);
+      if (block) {
+        const blockRect = block.getBoundingClientRect();
+        const paneRect = jsonPane.getBoundingClientRect();
+        const top = Math.max(
+          jsonPane.scrollTop + (blockRect.top - paneRect.top)
+            - Math.max((jsonPane.clientHeight - blockRect.height) / 2, 12),
+          0,
+        );
+        const from = jsonPane.scrollTop;
+        jsonPane.scrollTo({ top, behavior: "smooth" });
+        // Some environments drop smooth container scrolls outright
+        // (reduced-motion embeds); if nothing moved, land instantly.
+        setTimeout(() => {
+          if (jsonPane.scrollTop === from && Math.abs(top - from) > 4) {
+            jsonPane.scrollTop = top;
+          }
+        }, 250);
+      }
+    } else {
+      scroll(document.getElementById("md-" + id) || document.getElementById("md-" + owner));
+    }
+  }
+  if (opts.flash) {
+    nodesFor(id).forEach(n => {
+      n.classList.remove("flash");
+      void n.offsetWidth;
+      n.classList.add("flash");
+    });
+  }
+}
+
+// The extract pane's line highlight follows the one shared selection —
+// VUI keeps a single selectedPath driving both panes: clearing the
+// selection anywhere clears the line highlight too, and a doc-viewer
+// click reverse-looks-up the first shown field citing the element
+// (ExtractedDataJSONView.tsx:383-435). Skipped (fromField) when
+// focusField drives the selection: it owns its own line highlight.
+function syncFieldLines(id) {
+  document.querySelectorAll("#extract .ex-line.sel")
+    .forEach(n => n.classList.remove("sel"));
+  if (!id) return;
+  if (document.getElementById("extract").style.display !== "flex") return;
+  const ex = (DATA.extractions || []).find(x => x.job_item_id === shownExtract);
+  const field = ((ex && ex.evidence && ex.evidence.fields) || [])
+    .find(f => (f.element_ids || []).includes(id));
+  if (!field) return;
+  const line = document.querySelector(
+    `#extract .ex-line[data-path="${CSS.escape(field.field)}"]`);
+  if (!line) return;
+  line.classList.add("sel");
+  line.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+document.addEventListener("mouseover", ev => {
+  const n = ev.target.closest("[data-id]");
+  if (n) mark(n.dataset.id, "hov", true);
+});
+document.addEventListener("mouseout", ev => {
+  const n = ev.target.closest("[data-id]");
+  if (n) mark(n.dataset.id, "hov", false);
+});
+document.addEventListener("click", ev => {
+  const n = ev.target.closest("[data-id]");
+  if (!n || n.closest(".ex-field")) return;
+  // Click toggles: a literally-selected target clears the selection —
+  // VUI Dpt3ChunksMarkdown.tsx:288-296.
+  if (n.dataset.id === selected) {
+    select(null);
+    return;
+  }
+  const fromPage = !!n.closest("#pages");
+  select(n.dataset.id, { page: !fromPage, markdown: fromPage });
+});
+document.getElementById("clearsel").onclick = () => select(null);
+
+// Deep links: #element=<id> scrolls and flashes both panes;
+// #extract=<id>&field=<name> focuses the field in the extract rail AND
+// its evidence boxes on the pages (issue #10's agent contract).
+function applyHash() {
+  // Capture id values up to the next & and decode — so percent-encoded or
+  // otherwise non-[\w.-] ids in a deep link still resolve.
+  const ex = location.hash.match(/extract=([^&]+)/);
+  if (ex) {
+    const extractId = decodeURIComponent(ex[1]);
+    const fm = location.hash.match(/[#&]field=([^&]+)/);
+    if (fm) {
+      focusField(extractId, decodeURIComponent(fm[1]), { flash: true });
+    } else {
+      buildExtract(extractId);
+      switchTab("extract");
+    }
+    return;
+  }
+  const m = location.hash.match(/element=([^&]+)/);
+  if (!m) return;
+  const id = decodeURIComponent(m[1]);
+  if (byId.has(id) || byId.has(parentId(id) || "")) {
+    switchTab("parse");
+    select(id, { page: true, markdown: true, flash: true });
+  }
+}
+window.addEventListener("hashchange", applyHash);
+positionPills();
+// Extract-kind items open on their extraction — that's what the run is;
+// the Parse pill stays one click away. An explicit deep link (applyHash,
+// next) still wins.
+if (DATA.kind !== "parse" && (DATA.extractions || []).length) {
+  switchTab("extract");
+}
+applyHash();
+</script>
+<script>
+"use strict";
+/* ── History sidebar ────────────────────────────────────────────────────
+   Data: $ADE_HOME/history.js (JSONP: window.__ADE_HISTORY__), loaded via a
+   <script src> include — which works from file:// where XHR-style loading is blocked —
+   and re-polled with cache-busted re-injection so the background builder's
+   status flips (none → building → built) land in an open page. When the
+   include fails (the artifact traveled without the store) the sidebar
+   simply stays hidden; the document panes never depend on it.
+   Injection posture: every store-controlled string (source names, models,
+   ids) renders through textContent / .title — never innerHTML. */
+(function () {
+  const bar = document.getElementById("histbar");
+  const itemsBox = document.getElementById("hb-items");
+  const searchInput = document.getElementById("hb-search-input");
+  const filterBtn = document.getElementById("hb-filterbtn");
+  const badge = document.getElementById("hb-badge");
+  const pop = document.getElementById("hb-pop");
+  const SELF = DATA.job_item_id || (DATA.receipt && DATA.receipt.job_item_id);
+  const SRC = DATA.history_src || "../../history.js";
+  const POLL_MS = 3000;
+
+  const state = {
+    q: "",
+    kinds: { parse: true, extract: true },
+    date: "any", // any | day | week | month
+    models: null, // null = all; else Set of allowed model versions
+  };
+  let items = [];
+  let modelList = [];
+  let everLoaded = false;
+
+  // Time formatting per the Figma comp ("2m ago", "1h ago" — node 51:367):
+  // the compact form of vision-agent-ui's formatDistanceToNow convention.
+  function timeAgo(epochSeconds) {
+    if (!epochSeconds) return "";
+    const seconds = Math.max(0, Date.now() / 1000 - epochSeconds);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + "m ago";
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + "h ago";
+    const days = Math.floor(hours / 24);
+    if (days < 30) return days + "d ago";
+    const months = Math.floor(days / 30);
+    if (months < 12) return months + "mo ago";
+    return Math.floor(months / 12) + "y ago";
+  }
+
+  // The comp shows the model family without its date pin ("dpt-3-pro");
+  // the full resolved version stays on hover.
+  function modelShort(version) {
+    return (version || "").replace(/-\d{8}$/, "");
+  }
+
+  const DATE_CUTOFF = { day: 86400, week: 7 * 86400, month: 30 * 86400 };
+
+  function passes(item) {
+    if (state.q) {
+      const name = (item.source_name || item.source || "").toLowerCase();
+      if (!name.includes(state.q.toLowerCase())) return false;
+    }
+    if (!state.kinds[item.kind]) return false;
+    if (state.date !== "any") {
+      const t = item.completed_at || item.submitted_at;
+      if (!t || Date.now() / 1000 - t > DATE_CUTOFF[state.date]) return false;
+    }
+    if (state.models !== null) {
+      // Pending/failed items have no resolved model version yet, so they
+      // have no checkbox in the Model section — the filter leaves them be.
+      if (item.model_version && !state.models.has(item.model_version)) return false;
+    }
+    return true;
+  }
+
+  function activeFilterCount() {
+    let n = 0;
+    if (!state.kinds.parse || !state.kinds.extract) n++;
+    if (state.date !== "any") n++;
+    if (state.models !== null) n++;
+    return n;
+  }
+
+  const STATUS = {
+    parsed: ["complete", "complete"],
+    extracted: ["complete", "complete"],
+    markdown: ["complete", "complete"],
+    pending: ["pending", "in progress"],
+    failed: ["failed", "failed"],
+    unreadable: ["failed", "failed"],
+  };
+
+  // The selected row follows what the viewer is showing, not just whose
+  // artifact this page is: arriving via a referencing extract's deep link
+  // (#extract=<id>) must highlight THAT extract row — its viewer IS this
+  // parse item's page (decision 8), and highlighting the parse instead
+  // reads as a mis-navigation.
+  function currentId() {
+    const m = location.hash.match(/extract=([^&]+)/);
+    if (m) {
+      const id = decodeURIComponent(m[1]);
+      if (items.some(item => item.id === id)) return id;
+    }
+    return SELF;
+  }
+
+  function renderItems() {
+    itemsBox.textContent = "";
+    const current = currentId();
+    const shown = items.filter(passes);
+    if (!shown.length) {
+      const empty = document.createElement("div");
+      empty.className = "hb-empty";
+      empty.textContent = everLoaded
+        ? "No job items match."
+        : "No job items yet.";
+      itemsBox.appendChild(empty);
+      return;
+    }
+    for (const item of shown) {
+      const isCurrent = item.id === current;
+      const failed = item.state === "failed" || item.state === "unreadable";
+      // href is store-root-relative; null when nothing is renderable
+      // (dangling ref). While collapsed, links carry #sb=c so the state
+      // survives cross-page navigation (each viewer is its own document).
+      const linkable = !isCurrent && item.viewer === "built" && !!item.href;
+      const row = document.createElement(linkable ? "a" : "div");
+      row.className =
+        "hb-item" + (isCurrent ? " current" : "") + (failed ? " failed" : "");
+      if (linkable) {
+        const frag = stateFragment(true);
+        row.href = "../../" + item.href + (
+          frag.length
+            ? (item.href.includes("#") ? "&" : "#") + frag.join("&")
+            : ""
+        );
+      }
+
+      const r1 = document.createElement("div");
+      r1.className = "r1";
+      const chip = document.createElement("span");
+      chip.className = "hb-chip";
+      chip.textContent = item.kind === "extract" ? "Extract" : "Parse";
+      r1.appendChild(chip);
+      const name = document.createElement("span");
+      name.className = "hb-name";
+      name.textContent = item.source_name || item.source || item.id;
+      name.title = item.source || "";
+      r1.appendChild(name);
+      const [dotCls, statusLabel] = STATUS[item.state] || ["pending", item.state];
+      const dot = document.createElement("span");
+      dot.className = "hb-dot " + dotCls;
+      dot.title = statusLabel;
+      r1.appendChild(dot);
+      row.appendChild(r1);
+
+      // Meta line: `id · model · time` (credits stay out of the sidebar —
+      // they live in each result panel's header), and for failed runs
+      // `id · failed · reason` with the whole line red (node 51:437) —
+      // never a separate failure row.
+      const meta = document.createElement("div");
+      meta.className = "hb-meta";
+      const jid = document.createElement("span");
+      jid.className = "jid";
+      jid.textContent = item.short_id || item.id;
+      jid.title = item.id; // hover reveals the full job item id
+      meta.appendChild(jid);
+      const parts = [];
+      // The environment right after the id (before the model / the
+      // failure), so mixed-environment stores read at a glance; older
+      // items recorded no environment and render without the token.
+      // Display labels compress the canonical names ("prod" for
+      // production, "eu-prod" for eu); hover reveals the recorded name.
+      const ENV_LABELS = { production: "prod", eu: "eu-prod" };
+      if (item.environment)
+        parts.push([ENV_LABELS[item.environment] || item.environment,
+                    item.environment]);
+      if (failed) {
+        parts.push(["failed", null]);
+        if (item.reason) parts.push([item.reason, null]);
+      } else {
+        if (item.model_version)
+          parts.push([modelShort(item.model_version), item.model_version]);
+        const ago = timeAgo(item.completed_at || item.submitted_at);
+        if (ago) parts.push([ago, null]);
+      }
+      if (!isCurrent && item.viewer === "building") {
+        parts.push(["building viewer…", null]);
+      } else if (!isCurrent && item.viewer === "none" &&
+                 (item.state === "parsed" || item.state === "extracted")) {
+        row.title = "viewer not built yet — run: ade view " + (item.short_id || item.id);
+      }
+      for (const [part, hover] of parts) {
+        meta.appendChild(document.createTextNode(" · "));
+        const span = document.createElement("span");
+        if (part === "building viewer…") span.className = "hb-building";
+        span.textContent = part;
+        if (hover && hover !== part) span.title = hover;
+        meta.appendChild(span);
+      }
+      row.appendChild(meta);
+      itemsBox.appendChild(row);
+    }
+  }
+
+  function renderBadge() {
+    const n = activeFilterCount();
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+  }
+
+  // Collapsed-rail count: total store items, not the filtered view — the
+  // filters' UI is invisible while collapsed, so a filtered number would
+  // read as the store size and mislead.
+  const countEl = document.getElementById("hb-count");
+  function renderCount() {
+    countEl.hidden = items.length === 0;
+    countEl.textContent = String(items.length);
+    countEl.title = items.length + " job item" + (items.length === 1 ? "" : "s");
+  }
+
+  function renderPop() {
+    pop.textContent = "";
+    const sec = (label) => {
+      const d = document.createElement("div");
+      d.className = "sec";
+      d.textContent = label;
+      pop.appendChild(d);
+    };
+    const check = (label, checked, onchange) => {
+      const lab = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = checked;
+      box.addEventListener("change", () => { onchange(box.checked); update(); });
+      lab.appendChild(box);
+      lab.appendChild(document.createTextNode(label));
+      pop.appendChild(lab);
+    };
+    sec("Type");
+    check("Parse", state.kinds.parse, v => { state.kinds.parse = v; });
+    check("Extract", state.kinds.extract, v => { state.kinds.extract = v; });
+    sec("Date");
+    for (const [value, label] of [
+      ["any", "Any time"], ["day", "Last 24 hours"],
+      ["week", "Last 7 days"], ["month", "Last 30 days"],
+    ]) {
+      const lab = document.createElement("label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "hb-date";
+      radio.checked = state.date === value;
+      radio.addEventListener("change", () => { state.date = value; update(); });
+      lab.appendChild(radio);
+      lab.appendChild(document.createTextNode(label));
+      pop.appendChild(lab);
+    }
+    if (modelList.length) {
+      sec("Model");
+      for (const model of modelList) {
+        check(
+          model,
+          state.models === null || state.models.has(model),
+          v => {
+            const allowed = new Set(state.models === null ? modelList : state.models);
+            if (v) allowed.add(model); else allowed.delete(model);
+            state.models = allowed.size === modelList.length ? null : allowed;
+          },
+        );
+      }
+    }
+    const clear = document.createElement("button");
+    clear.className = "hb-clear";
+    clear.textContent = "Clear filters";
+    clear.addEventListener("click", () => {
+      state.kinds = { parse: true, extract: true };
+      state.date = "any";
+      state.models = null;
+      update();
+    });
+    pop.appendChild(clear);
+  }
+
+  function update() {
+    syncHash();
+    renderItems();
+    renderBadge();
+    renderCount();
+    renderPop();
+    if (!nameDrop.hidden) renderNameDrop(); // keep an open dropdown fresh
+  }
+
+  function absorb(payload) {
+    items = (payload && payload.items) || [];
+    const models = new Set();
+    for (const item of items) if (item.model_version) models.add(item.model_version);
+    modelList = Array.from(models).sort();
+    // A previously-selected model that vanished from the store drops out.
+    if (state.models !== null) {
+      state.models = new Set(
+        Array.from(state.models).filter(m => models.has(m)),
+      );
+      if (state.models.size === modelList.length) state.models = null;
+    }
+    everLoaded = true;
+    if (bar.hidden) {
+      // Unhiding the sidebar shifts the doc pane 260px — reanchor the
+      // header overlays (pills, page navigator) deterministically here;
+      // the ResizeObserver covers every other width change.
+      bar.hidden = false;
+      positionPills();
+    }
+    update();
+  }
+
+  function load() {
+    const tag = document.createElement("script");
+    // Cache-buster: file:// resolution ignores the query, the HTTP-style
+    // cache key does not — each poll reads the current file.
+    tag.src = SRC + "?t=" + Date.now();
+    tag.addEventListener("load", () => {
+      tag.remove();
+      if (window.__ADE_HISTORY__) absorb(window.__ADE_HISTORY__);
+    });
+    tag.addEventListener("error", () => tag.remove()); // no store: stay hidden
+    document.body.appendChild(tag);
+  }
+
+  // The chevron expands a dropdown of the store's document names, grouped
+  // (one row per distinct name, with its run count); picking one applies it
+  // as the search query.
+  const nameDrop = document.getElementById("hb-namedrop");
+  const searchToggle = document.getElementById("hb-search-toggle");
+
+  function closeNameDrop() {
+    nameDrop.hidden = true;
+    searchToggle.setAttribute("aria-expanded", "false");
+  }
+
+  function applyQuery(q) {
+    searchInput.value = q;
+    state.q = q;
+    syncHash();
+    renderItems();
+  }
+
+  function renderNameDrop() {
+    nameDrop.textContent = "";
+    const groups = new Set(
+      items.map(item => item.source_name || item.source || item.id),
+    );
+    const nameRow = (label, extraClass, onpick) => {
+      const row = document.createElement("button");
+      row.className = "hb-name-row" + (extraClass ? " " + extraClass : "");
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = label;
+      nm.title = label;
+      row.appendChild(nm);
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onpick();
+        closeNameDrop();
+      });
+      nameDrop.appendChild(row);
+    };
+    nameRow("All documents", "all", () => applyQuery(""));
+    for (const name of Array.from(groups).sort((a, b) => a.localeCompare(b))) {
+      nameRow(name, "", () => applyQuery(name));
+    }
+  }
+
+  searchToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    pop.classList.remove("open");
+    if (nameDrop.hidden) {
+      renderNameDrop();
+      nameDrop.hidden = false;
+      searchToggle.setAttribute("aria-expanded", "true");
+    } else {
+      closeNameDrop();
+    }
+  });
+  nameDrop.addEventListener("click", e => e.stopPropagation());
+
+  searchInput.addEventListener("input", () => {
+    state.q = searchInput.value.trim();
+    syncHash();
+    renderItems();
+  });
+  filterBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    pop.classList.toggle("open");
+    closeNameDrop();
+  });
+  pop.addEventListener("click", e => e.stopPropagation());
+  document.addEventListener("click", () => {
+    pop.classList.remove("open");
+    closeNameDrop();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { pop.classList.remove("open"); closeNameDrop(); }
+  });
+
+  // Collapse/expand: the collapsed rail shows only the LandingAI mark and
+  // this toggle. State rides in the URL hash (#sb=c) — each viewer is its
+  // own document, so it's the one place the preference can travel.
+  // Sidebar state (search, filters, collapse) rides in the URL hash —
+  // each viewer is its own document, so the hash is the only place the
+  // state can survive navigation. Row hrefs carry it forward; every
+  // state change rewrites this page's own hash so reloads keep it too.
+  function stateFragment(forHref) {
+    const parts = [];
+    if (bar.classList.contains("collapsed")) parts.push("sb=c");
+    if (state.q) parts.push("q=" + encodeURIComponent(state.q));
+    if (!(state.kinds.parse && state.kinds.extract)) {
+      parts.push("ft=" + ["parse", "extract"].filter(k => state.kinds[k]).join(","));
+    }
+    if (state.date !== "any") parts.push("fd=" + state.date);
+    if (state.models !== null) {
+      parts.push("fm=" + Array.from(state.models).map(encodeURIComponent).join(","));
+    }
+    if (FILE_MODE && Math.abs(zoom - 1) > 0.001) parts.push("z=" + zoom);
+    if (FILE_MODE && forHref) {
+      // The native-zoom baseline this page renders under — carried in
+      // ROW HREFS ONLY, z= or not. Chrome's menu zoom is invisible to the
+      // page as an event (nothing to intercept, no API to read or set it)
+      // and never survives a file:// hop on its own; but it scales
+      // devicePixelRatio, so the next viewer divides this value by its
+      // own DPR and mirrors the difference as CSS zoom — a menu-zoomed
+      // 150% page hands its LOOK to the next document.
+      //
+      // Never in the page's OWN hash: Chrome keys file:// zoom by the
+      // full URL INCLUDING the fragment, so rewriting our hash when
+      // native zoom changes hands Chrome a new zoom key mid-gesture and
+      // it re-applies whatever stale level that key last stored — a
+      // menu-zoom click then visibly fights itself (110 → 150 → 110).
+      //
+      // Served pages (ade view --serve) never stamp z=/dpr=: browser zoom
+      // is per-origin there, so every sibling viewer shares it natively.
+      parts.push("dpr=" + Math.round(devicePixelRatio * 10000) / 10000);
+    }
+    return parts;
+  }
+
+  // Page zoom, viewer-owned — but ONLY from file://. Over an http origin
+  // (ade view --serve) browser zoom is per-origin: one native zoom covers
+  // every sibling viewer, survives hops, reloads and restarts, and the
+  // browser's zoom indicator stays truthful — everything below exists to
+  // approximate that on file://, where zoom is keyed per URL and nothing
+  // survives a hop. There, browser zoom can neither be read nor restored
+  // across documents from JS, so ⌘/Ctrl +/-/0 and the ctrl+wheel pinch are
+  // intercepted into a CSS zoom on <body> that rides in the hash (#z=)
+  // like the sidebar state — row hrefs carry it to the next viewer,
+  // replaceState keeps it across reloads. Zoom from the browser's menu
+  // stays native (not interceptable) and is carried as a dpr= baseline
+  // instead (stateFragment). The ladder mirrors Chrome's zoom stops.
+  const FILE_MODE = location.protocol === "file:";
+  const ZOOM_LADDER = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+  let zoom = 1;
+  // A human zoom gesture closes the post-load settle window (restoreState):
+  // once the user has zoomed this page themselves, the scale is theirs and
+  // the carried baseline must stop correcting it.
+  let userZoomed = false;
+  // Feature gate: without working CSS zoom (old Firefox) there is no
+  // replacement to offer, so the native shortcuts must stay untouched —
+  // never preventDefault what we can't substitute.
+  const zoomSupported =
+    typeof CSS !== "undefined" && CSS.supports && CSS.supports("zoom", "2");
+  function applyZoom(next) {
+    zoom = Math.round(Math.min(3, Math.max(0.5, next)) * 10000) / 10000;
+    if (Math.abs(zoom - 1) < 0.005) zoom = 1; // snap float noise to clean 1
+    document.body.style.zoom = zoom === 1 ? "" : String(zoom);
+    syncHash();
+    renderItems(); // row hrefs carry the state forward
+  }
+  function stepZoom(dir) {
+    userZoomed = true; // only gestures step — settle correction never does
+    const idx = ZOOM_LADDER.findIndex(l => Math.abs(l - zoom) < 0.001);
+    const next = idx >= 0
+      ? ZOOM_LADDER[Math.min(ZOOM_LADDER.length - 1, Math.max(0, idx + dir))]
+      // Off-ladder (a hand-edited hash): snap to the nearest rung.
+      : (dir > 0
+          ? ZOOM_LADDER.find(l => l > zoom) ?? 3
+          : [...ZOOM_LADDER].reverse().find(l => l < zoom) ?? 0.5);
+    applyZoom(next);
+  }
+  if (zoomSupported && FILE_MODE) {
+    document.addEventListener("keydown", (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key === "=" || e.key === "+") { e.preventDefault(); stepZoom(1); }
+      else if (e.key === "-") { e.preventDefault(); stepZoom(-1); }
+      else if (e.key === "0") { e.preventDefault(); userZoomed = true; applyZoom(1); }
+    });
+    // Pinch gestures arrive as ctrl-wheel bursts; always claim the event
+    // so the browser never zooms between our throttled steps.
+    let lastWheelZoom = 0;
+    document.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastWheelZoom < 80) return;
+      lastWheelZoom = now;
+      stepZoom(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+  }
+  // Keep the carried dpr= fresh (file:// only — served hrefs carry none):
+  // a View-menu (native) zoom after load changes devicePixelRatio, and row
+  // hrefs stamped with the old value would mis-correct on the next page.
+  // matchMedia is the one reliable DPR-change signal; it matches a fixed
+  // value, so re-arm per change. Refresh the hrefs ONLY — never syncHash()
+  // here: rewriting our own hash in reaction to a native zoom change
+  // churns Chrome's per-URL file:// zoom key and re-applies stale levels
+  // (see stateFragment).
+  (function watchDpr() {
+    if (!FILE_MODE) return;
+    const mq = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+    const onChange = () => { renderItems(); watchDpr(); };
+    if (mq.addEventListener) {
+      mq.addEventListener("change", onChange, { once: true });
+    } else if (mq.addListener) {
+      // Safari ≤13 ships only the deprecated MediaQueryList.addListener;
+      // calling addEventListener there throws at load and would take the
+      // whole sidebar down with it.
+      const once = () => { mq.removeListener(once); onChange(); };
+      mq.addListener(once);
+    }
+  })();
+
+  function syncHash() {
+    // Preserve non-sidebar anchors (element=, extract=); replace ours.
+    const kept = location.hash.replace(/^#/, "").split("&")
+      .filter(p => p && !/^(sb|q|ft|fd|fm|z|dpr)=/.test(p));
+    const parts = kept.concat(stateFragment());
+    // replaceState: no history spam, and it never fires hashchange (which
+    // would re-render for a state we just rendered).
+    history.replaceState(
+      null, "",
+      location.pathname + location.search + (parts.length ? "#" + parts.join("&") : ""));
+  }
+
+  function setCollapsed(collapsed) {
+    bar.classList.toggle("collapsed", collapsed);
+    pop.classList.remove("open");
+    closeNameDrop();
+    syncHash();
+    renderItems(); // row hrefs carry the state forward
+  }
+  document.getElementById("hb-toggle").addEventListener("click", (e) => {
+    e.stopPropagation(); // don't bubble into the rail's expand-on-click
+    setCollapsed(true);
+  });
+  // VUI GlobalSidebarV3: the whole collapsed rail expands on click (the
+  // hover-revealed expand button included — its click bubbles here).
+  bar.addEventListener("click", () => {
+    if (bar.classList.contains("collapsed")) setCollapsed(false);
+  });
+  // Restore the sidebar state a navigation carried here (search text,
+  // filters, collapse) before the first data render.
+  (function restoreState() {
+    const raw = (k) => {
+      const m = location.hash.match(new RegExp("[#&]" + k + "=([^&]*)"));
+      return m ? m[1] : null;
+    };
+    const q = raw("q");
+    if (q) {
+      state.q = decodeURIComponent(q);
+      searchInput.value = state.q;
+    }
+    const ft = raw("ft");
+    if (ft !== null) {
+      const on = new Set(ft.split(",").filter(Boolean));
+      state.kinds = { parse: on.has("parse"), extract: on.has("extract") };
+    }
+    const fd = raw("fd");
+    if (fd === "day" || fd === "week" || fd === "month") state.date = fd;
+    const fm = raw("fm");
+    if (fm !== null) {
+      state.models = new Set(
+        fm.split(",").filter(Boolean).map(decodeURIComponent));
+    }
+    // Read every carried value BEFORE applying any: applyZoom and
+    // setCollapsed both syncHash(), which rewrites the hash from the
+    // state applied so far — a flag read after that rewrite is gone.
+    const z = parseFloat(raw("z") ?? "");
+    const dpr = parseFloat(raw("dpr") ?? "");
+    if (/[#&]sb=c(&|$)/.test(location.hash)) {
+      // Arriving already-collapsed: apply without replaying the shrink.
+      bar.classList.add("no-anim");
+      setCollapsed(true);
+      setTimeout(() => bar.classList.remove("no-anim"), 50);
+    }
+    // Served over an origin, zoom is the browser's own (per-origin native)
+    // — carried z=/dpr= only appears here via a link minted on file:// and
+    // is meaningless; strip it and let the origin zoom stand.
+    if (!FILE_MODE) {
+      if (!isNaN(z) || !isNaN(dpr)) syncHash();
+      return;
+    }
+    // Native-baseline correction (see stateFragment): the previous
+    // page's devicePixelRatio over ours is exactly the relative native
+    // zoom, so the carried state lands at the same VISUAL scale it had
+    // there — including a menu-zoomed page that carried no z= at all.
+    const base = isNaN(z) ? 1 : z;
+    const ratio = !isNaN(dpr) && dpr > 0 ? dpr / devicePixelRatio : 1;
+    if (Math.abs(base * ratio - 1) > 0.001) {
+      applyZoom(base * ratio); // syncHash()s to local truth internally
+    } else if (!isNaN(dpr) || !isNaN(z)) {
+      // Same-baseline hop: nothing to zoom, but the carried z=/dpr= must
+      // still leave our own URL — a dangling #dpr= is a live per-fragment
+      // Chrome zoom key, exactly what stateFragment works to avoid.
+      syncHash();
+    }
+    // The correction above is one-shot, but Chrome applies a remembered
+    // per-URL native zoom ASYNCHRONOUSLY — the issue-#61 trace shows it
+    // landing ~15ms AFTER the syncHash above, because that rewrite flips
+    // this document's file:// zoom key onto the very URL the stale level
+    // was stored under (a page menu-zoomed at a bare URL leaves 110%
+    // parked on that key forever). So a DPR move in the first moments
+    // after load is Chrome restoring a stored level, not a human reaching
+    // the View menu — re-run the same baseline math against the fresh DPR
+    // so the page keeps the visual scale it arrived with. The user's own
+    // gestures close the window early (the scale is theirs from then on),
+    // and a correction can itself flip the zoom key again, so keep
+    // watching until the deadline. Landings without a carried dpr= have
+    // no baseline to hold — the window never opens for them.
+    if (!isNaN(dpr) && dpr > 0 && zoomSupported) {
+      const arrivedVisual = base * dpr; // display-invariant: CSS zoom × DPR
+      const deadline = Date.now() + 1500;
+      (function settle() {
+        const mq = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+        const onChange = () => {
+          if (Date.now() > deadline || userZoomed) return;
+          applyZoom(arrivedVisual / devicePixelRatio);
+          settle();
+        };
+        if (mq.addEventListener) {
+          mq.addEventListener("change", onChange, { once: true });
+        } else if (mq.addListener) {
+          // Safari ≤13 (see watchDpr above).
+          const once = () => { mq.removeListener(once); onChange(); };
+          mq.addListener(once);
+        }
+      })();
+    }
+  })();
+
+  load();
+  // Poll unconditionally: a local-file read every few seconds costs nothing,
+  // and browsers already throttle background-tab timers. Refresh immediately
+  // on return so a backgrounded tab never shows stale statuses.
+  setInterval(load, POLL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) load();
+  });
+  // Same-page deep-link navigation (clicking an extract row of this parse)
+  // moves the selection without a reload.
+  window.addEventListener("hashchange", renderItems);
+})();
+</script>
+</body>
+</html>

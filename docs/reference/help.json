@@ -1,0 +1,1258 @@
+{
+  "cli": "ade",
+  "description": "CLI for Agentic Document Extraction (ADE) \u2014 parse and extract over the v2 document APIs, backed by a local job-item store.",
+  "conventions": [
+    {
+      "name": "--json",
+      "rule": "Every command supports --json: one stable JSON object/array on stdout (errors and pending payloads follow the same rule). Agents should always pass it. Each command's published shape is its 'result' block below \u2014 the full result is always on stdout, never only in a file."
+    },
+    {
+      "name": "--id-only",
+      "rule": "parse, extract, and find also take --id-only: just the id(s), one per line, for piping (JOB=$(ade parse -d f.pdf --id-only)). Errors and hints go to stderr so a captured id is never a sentence."
+    },
+    {
+      "name": "job item ids",
+      "rule": "Store commands take a job item id or an unambiguous prefix. Discover ids with `history list`; ambiguous or unknown ids error with candidates listed."
+    },
+    {
+      "name": "guarantees",
+      "rule": "parse and extract ensure a run exists rather than fire a request: an already-done run is served from disk free with an explicit notice (--force consents to a re-bill); a pending run is resumed, never resubmitted; Ctrl-C stops the waiting, not the work."
+    },
+    {
+      "name": "env overrides",
+      "rule": "ADE_HOME relocates the store; ADE_API_KEY overrides stored credentials; ADE_ENDPOINT overrides the stored endpoint."
+    }
+  ],
+  "commands": [
+    {
+      "name": "auth login",
+      "usage": "ade auth login [options] [--json]",
+      "summary": "Ensure the target environment is logged in; --api-key\nauthenticates with a key directly ('-' prompts with hidden input).\nTargets --env, else $ADE_ENV, else production \u2014 nothing is stored\nabout the choice.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--api-key",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Log in with this API key directly ('-' prompts with hidden input)."
+        },
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "method",
+            "what": "api_key | oauth"
+          },
+          {
+            "key": "credential",
+            "what": "masked credential \u2014 never the secret"
+          },
+          {
+            "key": "stored",
+            "what": "true once written to credentials.json"
+          },
+          {
+            "key": "already_authenticated",
+            "what": "present when the target needed nothing"
+          },
+          {
+            "key": "environment",
+            "what": "the resolved target"
+          },
+          {
+            "key": "endpoint",
+            "what": "its endpoint"
+          },
+          {
+            "key": "endpoint_source",
+            "what": "default | config | env"
+          },
+          {
+            "key": "identity",
+            "what": "OAuth logins: the token's identity claims"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "auth status",
+      "usage": "ade auth status [options] [--json]",
+      "summary": "Show the resolved target's auth method, identity, and expiry, plus\nevery other environment holding a credential.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "authenticated",
+            "what": "false (exit 1) when the target has no credential"
+          },
+          {
+            "key": "method",
+            "what": "api_key | oauth"
+          },
+          {
+            "key": "credential",
+            "what": "masked credential"
+          },
+          {
+            "key": "source",
+            "what": "env (ADE_API_KEY) | stored"
+          },
+          {
+            "key": "environment / endpoint / endpoint_source",
+            "what": "the resolved target"
+          },
+          {
+            "key": "other_environments",
+            "what": "every other environment holding a credential"
+          },
+          {
+            "key": "expires_at / expires_in_seconds / refresh_token",
+            "what": "OAuth only"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "auth logout",
+      "usage": "ade auth logout [options] [--json]",
+      "summary": "Log out of one environment (the resolved target by default); --all\nclears every environment. Idempotent; OAuth refresh tokens are revoked\nbest-effort first.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Log out of this environment: dev, staging, production, eu (default: $ADE_ENV, then production)."
+        },
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Log out of every environment at once."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "logged_out",
+            "what": "always true \u2014 logout is idempotent"
+          },
+          {
+            "key": "cleared",
+            "what": "false when there was nothing stored to clear"
+          },
+          {
+            "key": "revoked",
+            "what": "refresh tokens revoked best-effort"
+          },
+          {
+            "key": "scope",
+            "what": "environment | all"
+          },
+          {
+            "key": "environment",
+            "what": "the environment cleared (null with --all)"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "login",
+      "usage": "ade login [options] [--json]",
+      "summary": "Alias of `ade auth login`: ensure the target environment is logged in; --api-key authenticates with a key directly ('-' prompts with hidden input).",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--api-key",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Log in with this API key directly ('-' prompts with hidden input)."
+        },
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "method",
+            "what": "api_key | oauth"
+          },
+          {
+            "key": "credential",
+            "what": "masked credential \u2014 never the secret"
+          },
+          {
+            "key": "stored",
+            "what": "true once written to credentials.json"
+          },
+          {
+            "key": "already_authenticated",
+            "what": "present when the target needed nothing"
+          },
+          {
+            "key": "environment",
+            "what": "the resolved target"
+          },
+          {
+            "key": "endpoint",
+            "what": "its endpoint"
+          },
+          {
+            "key": "endpoint_source",
+            "what": "default | config | env"
+          },
+          {
+            "key": "identity",
+            "what": "OAuth logins: the token's identity claims"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "logout",
+      "usage": "ade logout [options] [--json]",
+      "summary": "Alias of `ade auth logout`: log out of one environment (the resolved target by default); --all clears every environment.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Log out of this environment: dev, staging, production, eu (default: $ADE_ENV, then production)."
+        },
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Log out of every environment at once."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "logged_out",
+            "what": "always true \u2014 logout is idempotent"
+          },
+          {
+            "key": "cleared",
+            "what": "false when there was nothing stored to clear"
+          },
+          {
+            "key": "revoked",
+            "what": "refresh tokens revoked best-effort"
+          },
+          {
+            "key": "scope",
+            "what": "environment | all"
+          },
+          {
+            "key": "environment",
+            "what": "the environment cleared (null with --all)"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "version",
+      "usage": "ade version [--json]",
+      "summary": "Print the ade version.",
+      "arguments": [],
+      "flags": [],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "version",
+            "what": "the installed ade version"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "help",
+      "usage": "ade help [COMMAND|TOPIC]... [--json]",
+      "summary": "Print the whole-surface command reference in one call: every\ncommand and flag, the output convention, each verb's result shape,\nexit states, and the store layout. The agent bootstrap \u2014 run this\n(with --json) before anything else. `help TOPIC` prints one\nconceptual page instead (workflow, output, credentials, errors).",
+      "arguments": [
+        {
+          "name": "[COMMAND|TOPIC]...",
+          "required": false,
+          "help": "Scope the reference to one command or group (`help extract`, `help auth login`), or print a topic: workflow, output, credentials, errors."
+        }
+      ],
+      "flags": [],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "cli / version / description",
+            "what": "what this binary is"
+          },
+          {
+            "key": "conventions",
+            "what": "the rules every command follows"
+          },
+          {
+            "key": "commands",
+            "what": "every command: usage, arguments, flags, result shape"
+          },
+          {
+            "key": "topics",
+            "what": "the conceptual pages (`ade help workflow`)"
+          },
+          {
+            "key": "exit_states",
+            "what": "every exit code and what it means"
+          },
+          {
+            "key": "store",
+            "what": "the on-disk layout"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "parse",
+      "usage": "ade parse [options] [--json]",
+      "summary": "Ensure a document is parsed; persist all artifacts locally.\n\nThe summary names the job item id every other verb takes: `find` it,\n`view` it, `extract` against it.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "-d, --document",
+          "metavar": "FILE",
+          "required": false,
+          "default": null,
+          "help": "Local document file to parse; pass exactly one of -d/--document or --document-url."
+        },
+        {
+          "flags": "--document-url",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Document URL the server fetches (identity is the URL x params; a re-run dedups even if the remote content changed \u2014 --force refreshes)."
+        },
+        {
+          "flags": "--model",
+          "metavar": "TEXT",
+          "required": false,
+          "default": "dpt-3-pro-latest",
+          "help": "Parse model registry version."
+        },
+        {
+          "flags": "--tier",
+          "metavar": "priority|standard",
+          "required": false,
+          "default": "priority",
+          "help": "Async lane: priority (full price, fast lane) or standard (half price, slower lane). The CLI defaults to priority."
+        },
+        {
+          "flags": "--pages",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "1-indexed, e.g. '1,3-5'."
+        },
+        {
+          "flags": "--options",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Full ParseOptions pass-through as a JSON object, sent verbatim (the server rejects unknown keys with a 422). Keys as of this release \u2014 pages: 1-indexed integer array (default: all pages); atomic_grounding: bool (default true; false omits the per-line atomic_grounding field from every node); inline_markdown: bool (default false; true adds each node's own markdown slice inline); blocks.<type>.markdown: bool (default true; false suppresses that type's markdown; types: text, table, figure, marginalia, attestation, logo, scan_code, card); blocks.table.format: 'html' (default) or 'markdown'; password: always rejected (422) \u2014 decrypt PDFs before upload. Example: '{\"inline_markdown\": true, \"blocks\": {\"table\": {\"format\": \"markdown\"}}}'. Merges with --pages; giving pages in both is an error."
+        },
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). Environments keep separate results \u2014 the job item id includes the environment."
+        },
+        {
+          "flags": "--wait",
+          "metavar": "FLOAT",
+          "required": false,
+          "default": 600.0,
+          "help": "Poll budget in seconds."
+        },
+        {
+          "flags": "--force",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Re-parse even if already parsed, or abandon an unreadable job for a fresh one (bills a new parse)."
+        },
+        {
+          "flags": "--include",
+          "metavar": "markdown|elements",
+          "required": false,
+          "default": null,
+          "help": "Carry a bulk artifact in the payload instead of leaving it on disk: markdown (the parse markdown) or elements (the flat projection `find` searches). Repeatable."
+        },
+        {
+          "flags": "--id-only",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "status",
+            "what": "'parsed'"
+          },
+          {
+            "key": "job_id",
+            "what": "server job id"
+          },
+          {
+            "key": "job_item_id",
+            "what": "store key every other verb takes"
+          },
+          {
+            "key": "environment",
+            "what": "resolved environment"
+          },
+          {
+            "key": "version",
+            "what": "resolved parse model version"
+          },
+          {
+            "key": "credits",
+            "what": "credits billed (0 on a cached hit)"
+          },
+          {
+            "key": "tier",
+            "what": "service tier the run was billed at"
+          },
+          {
+            "key": "page_count",
+            "what": "pages parsed"
+          },
+          {
+            "key": "failed_pages",
+            "what": "1-indexed pages the server could not parse"
+          },
+          {
+            "key": "cached",
+            "what": "true when served free from the store"
+          },
+          {
+            "key": "stored",
+            "what": "false when the result could not be persisted"
+          },
+          {
+            "key": "store_dir",
+            "what": "absolute path of the job item folder"
+          },
+          {
+            "key": "artifacts",
+            "what": "artifact filenames written there"
+          },
+          {
+            "key": "markdown",
+            "what": "the parse markdown \u2014 only with --include markdown"
+          },
+          {
+            "key": "elements",
+            "what": "the flat projection \u2014 only with --include elements"
+          }
+        ]
+      },
+      "band": "network verbs \u2014 the ADE job contracts"
+    },
+    {
+      "name": "extract",
+      "usage": "ade extract [JOB_ID] --schema TEXT [options] [--json]",
+      "summary": "Ensure an extraction exists for a parse job item (or bring-your-own\nmarkdown); persist the result as its own job item.\n\nThe schema-shaped result rides in the payload (`extraction`) with its\nper-field evidence; `view JOB_ID` renders the same join on the page,\nand `find`/`crop` on the referenced parse reach the cited elements.",
+      "arguments": [
+        {
+          "name": "[JOB_ID]",
+          "required": false,
+          "help": "A completed parse job item id (or unambiguous prefix)."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--schema",
+          "metavar": "TEXT",
+          "required": true,
+          "default": null,
+          "help": "JSON Schema file or inline JSON object."
+        },
+        {
+          "flags": "-d, --document",
+          "metavar": "FILE",
+          "required": false,
+          "default": null,
+          "help": "Extract by document path: reuse the latest completed parse of this path+content, else run a standalone parse job first \u2014 as if you had run `parse -d` \u2014 then extract (two billable jobs, both itemised)."
+        },
+        {
+          "flags": "--markdown",
+          "metavar": "FILE",
+          "required": false,
+          "default": null,
+          "help": "Escape hatch: extract from markdown that did not come from parse."
+        },
+        {
+          "flags": "--markdown-url",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Escape hatch: extract from markdown fetched from a URL server-side (the response's echoed markdown is stored)."
+        },
+        {
+          "flags": "--model",
+          "metavar": "TEXT",
+          "required": false,
+          "default": "extract-latest",
+          "help": "Extract model registry version."
+        },
+        {
+          "flags": "--tier",
+          "metavar": "priority|standard",
+          "required": false,
+          "default": "priority",
+          "help": "Async lane: priority (full price, fast lane) or standard (half price, slower lane). The CLI defaults to priority."
+        },
+        {
+          "flags": "--strict",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "v2 ExtractOptions pass-through: the server rejects (422) schemas with fields the model cannot extract instead of skipping them."
+        },
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). The JOB_ID form inherits the parse item's environment instead \u2014 its server-side parse job only exists there \u2014 and a conflicting --env is refused."
+        },
+        {
+          "flags": "--wait",
+          "metavar": "FLOAT",
+          "required": false,
+          "default": 600.0,
+          "help": "Poll budget in seconds."
+        },
+        {
+          "flags": "--force",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Re-extract even if already extracted, or abandon an unreadable job for a fresh one (bills a new extract)."
+        },
+        {
+          "flags": "--id-only",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "status",
+            "what": "'extracted'"
+          },
+          {
+            "key": "job_id",
+            "what": "server job id"
+          },
+          {
+            "key": "job_item_id",
+            "what": "this extraction's own job item"
+          },
+          {
+            "key": "parse_job_item_id",
+            "what": "the parse it references (absent for markdown)"
+          },
+          {
+            "key": "environment",
+            "what": "resolved environment"
+          },
+          {
+            "key": "version",
+            "what": "resolved extract model version"
+          },
+          {
+            "key": "credits",
+            "what": "credits billed (0 on a cached hit)"
+          },
+          {
+            "key": "tier",
+            "what": "service tier the run was billed at"
+          },
+          {
+            "key": "extraction",
+            "what": "THE RESULT: the schema-shaped object, verbatim"
+          },
+          {
+            "key": "fields",
+            "what": "number of leaf fields"
+          },
+          {
+            "key": "ungroundable",
+            "what": "field paths whose non-empty value has no box"
+          },
+          {
+            "key": "empty_fields",
+            "what": "field paths with no value (nothing to ground)"
+          },
+          {
+            "key": "schema_violation_error",
+            "what": "set when the extraction is partial (strict=false skipped schema fields); null on a clean run"
+          },
+          {
+            "key": "warnings",
+            "what": "server warnings, verbatim ([] when none)"
+          },
+          {
+            "key": "evidence",
+            "what": "{kind, reason?, fields[]} \u2014 the field\u2192box join"
+          },
+          {
+            "key": "cached",
+            "what": "true when served free from the store"
+          },
+          {
+            "key": "stored",
+            "what": "false when the result could not be persisted"
+          },
+          {
+            "key": "store_dir",
+            "what": "absolute path of the job item folder"
+          },
+          {
+            "key": "artifacts",
+            "what": "artifact filenames written there"
+          },
+          {
+            "key": "reused_parse",
+            "what": "the parse reused, when one was (no parse billed)"
+          },
+          {
+            "key": "parsed_first",
+            "what": "the standalone parse run first, when one was"
+          }
+        ]
+      },
+      "band": "network verbs \u2014 the ADE job contracts"
+    },
+    {
+      "name": "history list",
+      "usage": "ade history list [--json]",
+      "summary": "List stored job items: id, kind, state, env, params, source. Extract\nitems referencing a parse item indent beneath it. Bare `ade history`\ndefaults to this command.",
+      "arguments": [],
+      "flags": [],
+      "supports_json": true,
+      "result": {
+        "shape": "array",
+        "keys": [
+          {
+            "key": "job_item_id",
+            "what": "the item"
+          },
+          {
+            "key": "kind",
+            "what": "parse | extract"
+          },
+          {
+            "key": "state",
+            "what": "derived from the ticket and artifacts on disk"
+          },
+          {
+            "key": "source",
+            "what": "document path, URL, or markdown file"
+          },
+          {
+            "key": "params",
+            "what": "the invocation params, verbatim"
+          },
+          {
+            "key": "parse",
+            "what": "extract items: the referenced parse (and whether it is missing)"
+          },
+          {
+            "key": "created_at / completed_at",
+            "what": "epoch seconds (null when unknown)"
+          }
+        ]
+      },
+      "band": "local read models"
+    },
+    {
+      "name": "history clear",
+      "usage": "ade history clear [JOB_ID] [options] [--json]",
+      "summary": "Delete stored job items. Clearing a parse item cascades \u2014 with\nnotice \u2014 to the extract items referencing it, so the store never holds\ndangling refs.",
+      "arguments": [
+        {
+          "name": "[JOB_ID]",
+          "required": false,
+          "help": "Job item id or unambiguous prefix."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Delete every stored job item."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "cleared",
+            "what": "job item ids removed"
+          },
+          {
+            "key": "cascaded",
+            "what": "extract items removed with the parse they referenced"
+          }
+        ]
+      },
+      "band": "local read models"
+    },
+    {
+      "name": "find",
+      "usage": "ade find [JOB_ID] [QUERY] [options] [--json]",
+      "summary": "Search parsed elements locally: `find JOB_ID [QUERY]`, or --job\n(repeatable) for several items; no query lists every element.\n\nIds discovered here are what `view --element-id` deep-links and\n`crop --element-id` renders \u2014 though `crop` takes these same filters\ndirectly (`crop JOB_ID --type figure`) when you want the images\nrather than the records.",
+      "arguments": [
+        {
+          "name": "[JOB_ID] [QUERY]",
+          "required": false,
+          "help": "Job item id (or unambiguous prefix) to search, then an optional case-insensitive substring QUERY. With --job, the one allowed positional is the QUERY."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--job",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Parse job item to search (id or unambiguous prefix); repeatable for multi-item search. Equivalent to the positional JOB_ID for a single item."
+        },
+        {
+          "flags": "--regex",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Treat QUERY as a regular expression (case-insensitive; scope with (?-i:...))."
+        },
+        {
+          "flags": "--type",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Element type (text, table, table_cell, figure, ...)."
+        },
+        {
+          "flags": "--page",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": null,
+          "help": "1-indexed page number."
+        },
+        {
+          "flags": "--element-id",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Exact element id to match; repeatable."
+        },
+        {
+          "flags": "--limit",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": null,
+          "help": "Return at most this many matches."
+        },
+        {
+          "flags": "--id-only",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "array",
+        "keys": [
+          {
+            "key": "job_item_id",
+            "what": "the parse item the match came from"
+          },
+          {
+            "key": "element_id",
+            "what": "element id \u2014 what crop and view take"
+          },
+          {
+            "key": "type",
+            "what": "element type (text, table, table_cell, figure, ...)"
+          },
+          {
+            "key": "page",
+            "what": "1-indexed page"
+          },
+          {
+            "key": "box",
+            "what": "{xmin, ymin, xmax, ymax} fractions of page size"
+          },
+          {
+            "key": "text",
+            "what": "the element's markdown slice"
+          }
+        ],
+        "note": "One record per match, in document order; [] when nothing matched. --id-only prints the element ids alone."
+      },
+      "band": "local read models"
+    },
+    {
+      "name": "view",
+      "usage": "ade view [JOB_ID] [options] [--json]",
+      "summary": "Build a job item's self-contained grounded HTML viewer.",
+      "arguments": [
+        {
+          "name": "JOB_ID",
+          "required": false,
+          "help": "Job item id or unambiguous prefix (default: the latest viewable job item)."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--element-id",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Emit a deep link to this element."
+        },
+        {
+          "flags": "--crop",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "With --element-id: render that element's PNG crop instead of the HTML artifact."
+        },
+        {
+          "flags": "--open, --no-open",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Open the result in the browser. Default: open when stdout is a terminal; --json runs and piped output never auto-open."
+        },
+        {
+          "flags": "--dpi",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": null,
+          "help": "Page render dpi (default 120); with --crop, the crop dpi (default 300)."
+        },
+        {
+          "flags": "--pages",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Pages to embed images for, 1-indexed, e.g. '1,3-5'."
+        },
+        {
+          "flags": "--no-sidebar-sync",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Skip the background build of missing sibling viewers."
+        },
+        {
+          "flags": "--serve",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Open via a local server (http://127.0.0.1) instead of file:// \u2014 browser zoom then covers every viewer natively. Starts the server if needed; reuses a running one. It retires itself after 30 idle minutes, or immediately with --stop-server."
+        },
+        {
+          "flags": "--stop-server",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Stop the local viewer server (started by --serve) and exit."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "status",
+            "what": "'viewed' ('cropped' with --crop, 'synced' with --sync-viewers)"
+          },
+          {
+            "key": "job_item_id",
+            "what": "the item rendered"
+          },
+          {
+            "key": "kind",
+            "what": "parse | extract"
+          },
+          {
+            "key": "path",
+            "what": "the self-contained view.html (or the PNG, with --crop)"
+          },
+          {
+            "key": "built",
+            "what": "true when this run rebuilt the artifact"
+          },
+          {
+            "key": "pages_embedded",
+            "what": "pages inlined; the rest load from sidecars"
+          },
+          {
+            "key": "note",
+            "what": "why the render weakened, when it did (else null)"
+          },
+          {
+            "key": "deep_link",
+            "what": "view.html#element=... when --element-id was given"
+          },
+          {
+            "key": "history_items",
+            "what": "items in the rebuilt sidebar read model"
+          },
+          {
+            "key": "sidebar_sync",
+            "what": "true when sibling viewers build in the background"
+          }
+        ]
+      },
+      "band": "local read models"
+    },
+    {
+      "name": "crop",
+      "usage": "ade crop [JOB_ID] [options] [--json]",
+      "summary": "Crop element regions from the source document into PNGs: one\n`--element-id`, or a filtered batch (`--type figure`, `--page`,\n`--all`) with the same filters `ade find` searches by.",
+      "arguments": [
+        {
+          "name": "[JOB_ID]",
+          "required": false,
+          "help": "Job item id or unambiguous prefix."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--element-id",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Element to crop (ids from `ade find`); repeatable."
+        },
+        {
+          "flags": "--type",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Crop every element of this type (text, table, figure, ...) \u2014 `find`'s filter, applied here."
+        },
+        {
+          "flags": "--page",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": null,
+          "help": "Restrict the selection to this 1-indexed page."
+        },
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Crop every element the filters select (on its own: the whole item)."
+        },
+        {
+          "flags": "-o, --output",
+          "metavar": "PATH",
+          "required": false,
+          "default": null,
+          "help": "PNG path for a single crop, or a directory for several (default: the job item's crops/ dir)."
+        },
+        {
+          "flags": "--dpi",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": 300,
+          "help": "Render dpi."
+        },
+        {
+          "flags": "--open",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Open the crop (or the directory holding them)."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "status",
+            "what": "'cropped'"
+          },
+          {
+            "key": "job_item_id",
+            "what": "the addressed item (crops land under its crops/)"
+          },
+          {
+            "key": "element_id",
+            "what": "single-crop mode: the element cropped"
+          },
+          {
+            "key": "type / page / box",
+            "what": "single-crop mode: what was cropped, where"
+          },
+          {
+            "key": "dpi",
+            "what": "render dpi"
+          },
+          {
+            "key": "path",
+            "what": "single-crop mode: the PNG written"
+          },
+          {
+            "key": "width / height",
+            "what": "single-crop mode: pixel dimensions"
+          },
+          {
+            "key": "count",
+            "what": "batch mode: how many PNGs were written"
+          },
+          {
+            "key": "directory",
+            "what": "batch mode: where they landed"
+          },
+          {
+            "key": "crops",
+            "what": "batch mode: one record per PNG (element_id, type, page, box, dpi, path, width, height)"
+          }
+        ],
+        "note": "One --element-id yields the flat single-crop object; any filter (--type/--page/--all) yields the batch object with crops[]."
+      },
+      "band": "local read models"
+    }
+  ],
+  "topics": [
+    {
+      "name": "workflow",
+      "title": "How the verbs compose",
+      "body": [
+        "parse \u2500\u252c\u2500> find \u2500\u2500> crop        look at an element as an image",
+        "       \u251c\u2500> view                 grounded page images + markdown",
+        "       \u2514\u2500> extract \u2500\u2500> view     schema-shaped data, grounded",
+        "",
+        "1. parse    ensure a document is parsed. Prints a job item id;",
+        "            every other verb takes it (or an unambiguous prefix).",
+        "2. find     search that parse's elements locally \u2014 zero API calls.",
+        "            Returns citation records: job_item_id, element_id,",
+        "            type, page, box, text.",
+        "3. crop     render element regions as PNGs: one --element-id, or a",
+        "            batch by find's own filters (--type figure, --all).",
+        "4. extract  ensure a schema extraction exists for a parse job item",
+        "            (or bring-your-own markdown). It becomes its own job",
+        "            item, referencing the parse \u2014 artifacts never copied.",
+        "5. view     build the self-contained HTML viewer for a parse or an",
+        "            extract item; --element-id emits a deep link to one",
+        "            element \u2014 the citation contract.",
+        "",
+        "Every verb is a guarantee, not a request: re-running the same",
+        "invocation is served from the local store for free, a pending run",
+        "is resumed rather than resubmitted, and only --force re-bills.",
+        "`history list` is the store's index when you have lost an id."
+      ]
+    },
+    {
+      "name": "output",
+      "title": "Output modes and where results live",
+      "body": [
+        "Default        human-readable text on stdout.",
+        "--json         one stable JSON object/array \u2014 the whole result,",
+        "               including the extraction itself. Never requires",
+        "               reading a file out of the store.",
+        "--id-only      just the id(s), one per line, for piping:",
+        "                 JOB=$(ade parse -d f.pdf --id-only)",
+        "                 ade find $JOB --type figure --id-only",
+        "               Errors and hints go to stderr, so a captured id is",
+        "               never a sentence. Takes precedence over --json.",
+        "",
+        "`ade help --json` carries every verb's result shape (the `result`",
+        "block per command). Bulk parse artifacts stay on disk unless asked",
+        "for: `ade parse -d f.pdf --include markdown --json`.",
+        "",
+        "Artifacts are also plain files under ~/.ade/jobs/<job-item-id>/ \u2014",
+        "a convenience, never the contract."
+      ]
+    },
+    {
+      "name": "credentials",
+      "title": "Credentials, environments, and headless setup",
+      "body": [
+        "The target environment is resolved fresh on every command:",
+        "--env, else $ADE_ENV, else production. Nothing is sticky, so a",
+        "login and the verb after it can never disagree. Credentials are",
+        "stored per environment in ~/.ade/credentials.json (mode 0600).",
+        "",
+        "Headless (no terminal to prompt on), in order of preference:",
+        "  export ADE_API_KEY=...           overrides any stored credential",
+        "  echo $KEY | ade auth login       a piped key is a prompt answered",
+        "  ade auth login --api-key $KEY    inline (visible to `ps`)",
+        "",
+        "`ade auth status --json` reports the resolved target, how it is",
+        "authenticated, and every other environment holding a credential."
+      ]
+    },
+    {
+      "name": "errors",
+      "title": "Exit states and error payloads",
+      "body": [
+        "Every non-success outcome is one payload shape: an `error` code",
+        "plus a human `message` that names the remediation, on stdout with",
+        "--json exactly like a result. Pending is not an error \u2014 it is a",
+        "normal outcome with its own exit code and a resumable payload.",
+        "",
+        "Common codes: unknown_id / ambiguous_id (with candidates),",
+        "not_parsed, unknown_element, no_parse_linkage, source_missing,",
+        "no_credential, bad_source, bad_query.",
+        "",
+        "The recovery gesture for a pending run is always the same command,",
+        "re-run: it joins the recorded job, never resubmits, never re-bills."
+      ]
+    }
+  ],
+  "exit_states": [
+    {
+      "code": 0,
+      "name": "ok",
+      "meaning": "Success \u2014 the command's payload is on stdout."
+    },
+    {
+      "code": 1,
+      "name": "failed",
+      "meaning": "The run failed or the target cannot serve the request (job failure, unknown id, missing parse, unreadable result)."
+    },
+    {
+      "code": 2,
+      "name": "usage",
+      "meaning": "The invocation itself was wrong; nothing was submitted."
+    },
+    {
+      "code": 3,
+      "name": "pending",
+      "meaning": "The wait budget expired while the job continues server-side \u2014 a normal outcome, not an error. The payload carries a 'pending' status plus the job_id and job_item_id; re-run the same command to resume polling (never resubmits, never re-bills)."
+    },
+    {
+      "code": 4,
+      "name": "rate_limited",
+      "meaning": "Submit was rate-limited and the wait budget ran out before a job existed; nothing was submitted, nothing bills. Re-run to retry."
+    }
+  ],
+  "store": {
+    "home": "~/.ade (ADE_HOME overrides)",
+    "layout": [
+      {
+        "path": "~/.ade/config.json",
+        "what": "endpoint + named-environment config"
+      },
+      {
+        "path": "~/.ade/credentials.json",
+        "what": "per-environment credentials (mode 0600; written by `auth login`)"
+      },
+      {
+        "path": "~/.ade/history.js",
+        "what": "sidebar read model over jobs/, rewritten from a fresh store scan by every view/history run"
+      },
+      {
+        "path": "~/.ade/jobs/<job-item-id>/",
+        "what": "one folder per run \u2014 parse and extract alike, all top-level siblings (flat, never nested)"
+      },
+      {
+        "path": "  meta.json",
+        "what": "commit record: kind, source, identity, params, state, timestamps, artifact index"
+      },
+      {
+        "path": "  job.json",
+        "what": "claim ticket: server job_id, tier, state \u2014 what a re-run resumes"
+      },
+      {
+        "path": "  parse.json / parse.md / elements.json",
+        "what": "parse items: the raw ParseResponse verbatim, its markdown, and the flat elements projection (grounding inline)"
+      },
+      {
+        "path": "  extract.json / evidence.json",
+        "what": "extract items: the raw result verbatim and the local field\u2192box evidence join"
+      },
+      {
+        "path": "  parse/ref.json",
+        "what": "parse-backed extract items: the reference to the parse job item (artifacts are never copied)"
+      },
+      {
+        "path": "  markdown.md",
+        "what": "bring-your-own-markdown extract items: the input markdown, copied in (spans index exactly these bytes)"
+      },
+      {
+        "path": "  view.html / crops/",
+        "what": "derived artifacts: the self-contained viewer and PNG crops \u2014 recomputable, built on demand"
+      }
+    ]
+  }
+}

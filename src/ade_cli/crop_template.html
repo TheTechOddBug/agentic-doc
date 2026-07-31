@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ade crop</title>
+<!-- Single-element crop artifact, visually consistent with view.html:
+     same tokens/header/pane treatment (VUI globals.css), the same
+     Markdown/JSON FormatToggle (ProjectParseTab.tsx:655-693), the crop
+     shown as a page sheet on the doc-pane backdrop, and the citing
+     extraction fields in the Results-section style. Self-contained. -->
+<style>
+  :root { --bg-main:#fff; --bg-raised:#fff; --bg-subtlest:#fafaf7; --bg-subtle:#f6f6ef;
+    --bg-highlight:#efefe5; --bg-main-hovered:#f8fafc;
+    --text-primary:#1a1916; --text-secondary:#44423c; --text-tertiary:#878682;
+    --border-subtle:#e7e7d9; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin:0; background:var(--bg-main); color:var(--text-primary);
+    font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display:flex; flex-direction:column; overflow:hidden; }
+  button { font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+  header { display:flex; height:52px; flex-shrink:0; align-items:center; gap:8px;
+    border-bottom:1px solid var(--border-subtle); background:var(--bg-raised); padding:0 16px; }
+  .brand { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .crumb { color:var(--text-tertiary); }
+  .doc-emoji { font-size:13px; }
+  .doc-name { font-size:14px; font-weight:500; }
+  header code { font-size:13px; }
+  .badge { padding:1px 8px; border-radius:999px; font-size:11px; background:var(--bg-highlight); color:var(--text-secondary); }
+  /* header action — VUI's Get Code button treatment (ProjectHeader.tsx:456-468) */
+  header a { margin-left:auto; display:flex; align-items:center; padding:6px 10px; border-radius:4px;
+    border:1px solid var(--border-subtle); background:var(--bg-main); font-size:13px; font-weight:500;
+    color:var(--text-primary); text-decoration:none; }
+  header a:hover { background:var(--bg-subtlest); }
+  /* workflow pills — same as view.html (ProjectHeader.tsx:578-717) */
+  #pills { position:absolute; left:50%; top:50%; transform:translateY(-50%); display:flex; align-items:center; }
+  header { position:relative; }
+  .pill { display:flex; align-items:center; gap:6px; border-radius:6px; border:1px solid var(--border-subtle);
+    background:var(--bg-main); padding:4px 6px; }
+  .pill.active { border-color:#CED6C8; background:var(--bg-highlight); }
+  .pill .pill-label { font-size:12px; font-weight:500; color:var(--text-secondary); }
+  .pill.active .pill-label { font-weight:600; color:var(--text-primary); }
+  .connector { height:1px; width:16px; background:#E7E7D9; }
+  main { flex:1; display:flex; min-height:0; }
+  #docpane { width:50%; min-width:300px; background:var(--bg-highlight); overflow:auto; padding:16px; }
+  /* sash — same allotment-style handle as view.html (VUI globals.css:726-753) */
+  #sash { position:relative; width:1px; flex-shrink:0; background:var(--border-subtle); cursor:col-resize; }
+  #sash::before { content:''; position:absolute; inset:0 -4px; }
+  #sash::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:8px; height:36px; border-radius:6px; background:#f8fafc; border:1px solid var(--border-subtle); pointer-events:none; }
+  body.resizing #sash { background:#039855; }
+  .cropwrap { position:relative; }
+  #docpane img { display:block; width:100%; height:auto; background:#fff; }
+  /* atomic_grounding parts remapped into the crop's frame — same inset
+     box-shadow sub-box treatment as the document viewer's line boxes */
+  .part { position:absolute; box-shadow:inset 0 0 0 1px var(--c); cursor:default; }
+  .part:hover { background:color-mix(in srgb, var(--c) 12%, transparent); }
+  #docpane .meta { margin-top:6px; font-size:12px; color:var(--text-tertiary); }
+  #rightpane { flex:1; min-width:0; display:flex; flex-direction:column; }
+  /* toolbar + FormatToggle — same as view.html (ProjectParseTab.tsx:351,655-693) */
+  #toolbar { z-index:20; display:flex; flex-shrink:0; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--border-subtle); padding:12px 12px 8px; }
+  .format-toggle { display:inline-flex; align-items:center; border-radius:6px; background:var(--bg-subtle); }
+  .format-toggle button { display:flex; align-items:center; border-radius:6px; padding:6px 8px;
+    border:1px solid transparent; }
+  .format-toggle button.active { border-color:var(--border-subtle); background:var(--bg-main); }
+  .format-toggle .seg-label { padding:0 6px; font-size:12px; line-height:16px; font-weight:500; }
+  svg.i { width:16px; height:16px; }
+  #content { min-height:0; flex:1; overflow:auto; }
+  /* markdown row — same card treatment as the viewer's mdrow */
+  #mdview { padding:16px 8px 8px; }
+  .mdrow { position:relative; margin:12px 8px; padding:8px; border-radius:4px; border:1px solid var(--c); }
+  .mdlabel { position:absolute; top:-12px; left:8px; border-radius:2px; padding:0 4px 0;
+    border:2px solid var(--c); background:var(--c); color:#fff; font-size:12px; line-height:1.4; text-transform:capitalize; }
+  .mdtext { white-space:pre-wrap; word-break:break-word; }
+  /* region spans — same tiled treatment as the viewer's regionSegments */
+  .mdtext span.region { border-radius:2px; box-decoration-break:clone; -webkit-box-decoration-break:clone; cursor:pointer; }
+  .mdtext span.region:hover, .mdtext span.region.hov { background:color-mix(in srgb, var(--c) 20%, transparent); }
+  .part.hov { background:color-mix(in srgb, var(--c) 12%, transparent); }
+  /* rendered markdown (non-tiled elements: figures, single-line text) — same
+     .mdbody treatment as view.html so the crop matches the full viewer, which
+     keeps allowlisted tags (figure, br, …) and unwraps unknown ones like
+     <description> to their text. Unlike view.html, .mdbody here lives inside
+     .mdtext (white-space:pre-wrap, needed by the tiled-regions branch), so
+     reset to the default view.html's .mdbody inherits — otherwise headings/
+     lists would preserve whitespace the full viewer collapses. */
+  .mdbody { white-space:normal; }
+  .mdbody p, .mdbody div.rawhtml { margin:0 0 8px; white-space:pre-line; }
+  .mdbody h1, .mdbody h2, .mdbody h3, .mdbody h4 { margin:4px 0 8px; line-height:1.3; }
+  .mdbody ul { margin:0 0 8px; padding-left:22px; }
+  .mdbody code { background:var(--bg-subtle); border-radius:3px; padding:0 4px; font-size:13px; }
+  .mdbody a { color:#3b82f6; } .mdbody a:hover { text-decoration:underline; }
+  .mdbody figure { margin:0 0 8px; white-space:pre-line; }
+  .mdbody > :last-child { margin-bottom:0; }
+  /* JSON view — same container as view.html's #jsonview */
+  #jsonview { display:none; margin:8px; border-radius:5px; border:1px solid var(--border-subtle);
+    background:var(--bg-subtlest); padding:8px 12px; overflow:auto;
+    font:13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre; }
+  .j-key{color:#a31515} .j-str{color:#0451a5} .j-num{color:#098658} .j-lit{color:#0451a5}
+  /* citing fields — the viewer's ex-section / ex-line styles */
+  .ex-section { margin:0 8px 8px; border:1px solid var(--border-subtle); background:var(--bg-subtlest); }
+  /* Section BODY is white like the playground (and view.html's .ex-sec-body):
+     in VUI only the section container + header carry bg-subtlest; the
+     expanded body is the Monaco editor's vs-theme background (#fffffe). */
+  #fields { background:var(--bg-main); }
+  .ex-sec-head { display:flex; height:24px; align-items:center; gap:4px; border-bottom:1px solid var(--border-subtle);
+    padding:0 12px; font-size:12px; font-weight:500; }
+  .ex-line { position:relative; min-height:20px; padding:2px 16px 2px 12px; border-left:2px solid transparent;
+    font-size:13px; display:flex; flex-wrap:wrap; gap:2px 10px; }
+  .ex-line:hover { border-left-color:#12B76A; background:rgba(18,183,106,.1); }
+  .ex-line .fname { min-width:0; max-width:100%; font-weight:500; color:var(--text-secondary); overflow-wrap:anywhere; }
+  .ex-line .fval { flex:1; min-width:200px; white-space:pre-wrap; word-break:break-word; }
+  .ex-line code { margin-left:auto; }
+  .ex-line code { font-size:11px; color:var(--text-tertiary); }
+  .empty { padding:8px 12px; font-size:12.5px; color:var(--text-tertiary); }
+  /* Extract tab: the viewer's Results | Schema split, scoped to the crop */
+  #extract { display:none; flex-direction:row; min-height:0; flex:1; }
+  .ex-half { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .ex-half:first-child { border-right:1px solid var(--border-subtle); }
+  .ex-panel-head { display:flex; flex-shrink:0; align-items:center; gap:6px;
+    border-bottom:1px solid var(--border-subtle); padding:8px 16px; }
+  .ex-panel-head .ptitle { font-size:15px; font-weight:600; }
+  .ex-scroll { min-height:0; flex:1; overflow:auto; }
+  .sc-tree { padding:12px 16px 12px 8px; }
+  .sc-row { position:relative; padding:5px 12px 5px 32px; border-radius:4px; }
+  .sc-row:hover { background:var(--bg-subtlest); }
+  .sc-row.hl { background:rgba(74,222,128,.1); }
+  .schevbtn { position:absolute; left:16px; top:9px; display:flex; width:16px; height:16px;
+    align-items:center; justify-content:center; cursor:pointer; color:var(--text-secondary); }
+  .schevbtn svg { width:12px; height:12px; transform:rotate(90deg); transition:transform .15s; }
+  .sc-row.closed .schevbtn svg { transform:rotate(0deg); }
+  .ex-json-line { min-height:20px; padding:0 16px 0 12px; border-left:2px solid transparent;
+    font:13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre; }
+  .ex-json-line[data-path] { cursor:pointer; }
+  .ex-json-line[data-path]:hover { border-left-color:#12B76A; background:rgba(18,183,106,.1); }
+  .sc-row .sname { padding:2px 4px; font-size:14px; font-weight:600; }
+  .sc-row .stype { display:inline-flex; border-radius:5px; padding:2px 8px; font-size:12px; font-weight:500; border:1px solid; }
+  .stype.t-object{background:#ecfdf3;border-color:#d1fadf} .stype.t-string{background:#fefbe8;border-color:#fef7c3}
+  .stype.t-number{background:#f4f3ff;border-color:#ebe9fe} .stype.t-boolean{background:#fef3f2;border-color:#fee4e2}
+  .stype.t-enum{background:#ebf7ff;border-color:#def3ff}
+  .sc-row .sdesc { padding:0 4px; font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sc-kids { margin-left:16px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand" title="LandingAI"><svg height="20" overflow="visible" viewBox="0 0 15.5251 20.4625" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="Group"><path id="Vector" d="M0.14726 12.3474C0.0806449 12.3118 9.15527e-05 12.3601 9.15527e-05 12.4356V16.4338C9.15527e-05 16.4707 0.0203979 16.5046 0.0529234 16.522L3.25292 18.2337C3.31954 18.2694 3.40009 18.2211 3.40009 18.1456V14.1474C3.40009 14.1105 3.37979 14.0766 3.34726 14.0592L0.14726 12.3474Z" fill="#1A1916"/><path id="Vector_2" d="M0.14726 7.38493C0.0806449 7.3493 9.15527e-05 7.39756 9.15527e-05 7.47311V11.4713C9.15527e-05 11.5082 0.0203978 11.5421 0.0529234 11.5595L3.25292 13.2712C3.31954 13.3069 3.40009 13.2586 3.40009 13.1831V9.18487C3.40009 9.14798 3.37979 9.11409 3.34726 9.09669L0.14726 7.38493Z" fill="#1A1916"/><path id="Vector_3" d="M0.14726 2.42243C0.0806449 2.38679 9.15527e-05 2.43506 9.15527e-05 2.51061V6.51494C9.15527e-05 6.55188 0.0204539 6.58581 0.0530496 6.60319L3.25305 8.30907C3.31966 8.34458 3.40009 8.29631 3.40009 8.22082V4.22237C3.40009 4.18548 3.37979 4.15159 3.34726 4.13419L0.14726 2.42243Z" fill="#1A1916"/><path id="Vector_4" d="M12.1841 14.0592C12.1516 14.0766 12.1313 14.1105 12.1313 14.1473V18.1454C12.1313 18.221 12.212 18.2693 12.2786 18.2336L15.4723 16.522C15.5048 16.5046 15.5251 16.4707 15.5251 16.4338V12.4358C15.5251 12.3602 15.4445 12.3119 15.3779 12.3476L12.1841 14.0592Z" fill="#1A1916"/><path id="Vector_5" d="M4.10286 9.09668C4.07037 9.11409 4.05009 9.14796 4.05009 9.18482V13.1829C4.05009 13.2585 4.13071 13.3068 4.19733 13.2711L7.39108 11.5595C7.42357 11.5421 7.44384 11.5082 7.44384 11.4713V7.47325C7.44384 7.39767 7.36323 7.34941 7.29661 7.38511L4.10286 9.09668Z" fill="#1A1916"/><path id="Vector_6" d="M4.10286 4.13418C4.07037 4.15159 4.05009 4.18546 4.05009 4.22232V8.22068C4.05009 8.2962 4.13059 8.34446 4.1972 8.30889L7.39095 6.6032C7.42351 6.58581 7.44384 6.5519 7.44384 6.51499V2.51075C7.44384 2.43517 7.36323 2.38691 7.29661 2.42261L4.10286 4.13418Z" fill="#1A1916"/><path id="Vector_7" d="M6.93577 1.89446C7.00607 1.8567 7.006 1.75585 6.93564 1.71819L3.77228 0.0252075C3.7428 0.00943069 3.70739 0.00943062 3.67791 0.0252074L0.514555 1.71819C0.444194 1.75584 0.444121 1.8567 0.514428 1.89446L3.67778 3.5933C3.70733 3.60916 3.74286 3.60916 3.77241 3.5933L6.93577 1.89446Z" fill="#1A1916"/><path id="Vector_8" d="M4.19733 14.4976C4.13071 14.4619 4.05009 14.5102 4.05009 14.5857V18.59C4.05009 18.6269 4.07043 18.6608 4.10299 18.6782L7.29674 20.3839C7.36335 20.4195 7.44384 20.3712 7.44384 20.2957V16.2973C7.44384 16.2605 7.42357 16.2266 7.39108 16.2092L4.19733 14.4976Z" fill="#1A1916"/><path id="Vector_9" d="M8.14661 16.2092C8.11412 16.2266 8.09384 16.2605 8.09384 16.2973V20.2957C8.09384 20.3712 8.17434 20.4195 8.24095 20.3839L11.4347 18.6782C11.4673 18.6608 11.4876 18.6269 11.4876 18.59V14.5857C11.4876 14.5102 11.407 14.4619 11.3404 14.4976L8.14661 16.2092Z" fill="#1A1916"/><path id="Vector_10" d="M4.55752 13.7994C4.48736 13.8371 4.48736 13.9378 4.55752 13.9755L7.71526 15.6745C7.74482 15.6904 7.78038 15.6904 7.80995 15.6745L10.9735 13.9756C11.0438 13.9378 11.0438 13.8371 10.9735 13.7994L7.80995 12.1004C7.78038 12.0845 7.74482 12.0845 7.71526 12.1004L4.55752 13.7994Z" fill="#1A1916"/><path id="Vector_11" d="M15.0231 11.8192C15.0935 11.7816 15.0936 11.6807 15.0233 11.6429L11.86 9.94413C11.8304 9.92825 11.7948 9.92827 11.7653 9.94417L8.60781 11.643C8.53759 11.6808 8.53766 11.7815 8.60793 11.8192L11.7654 13.5121C11.7949 13.528 11.8303 13.528 11.8598 13.5122L15.0231 11.8192Z" fill="#1A1916"/></g></svg><svg height="13" overflow="visible" viewBox="0 0 80.775 16.95" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="Group"><path id="Vector" d="M2.4625 0.3625H0V13.0875H1.8125H2.4625H8.29375V10.9H2.4625V0.3625ZM15.9688 5.16875C15.725 4.91875 15.4437 4.70625 15.1187 4.54375C14.625 4.2875 14.0687 4.1625 13.4562 4.1625C12.65 4.1625 11.925 4.3625 11.2938 4.7625C10.6625 5.1625 10.1625 5.70625 9.8 6.39375C9.4375 7.08125 9.25625 7.8625 9.25625 8.73125C9.25625 9.5875 9.4375 10.3625 9.8 11.05C10.1625 11.7375 10.6625 12.2812 11.2938 12.6812C11.925 13.0812 12.6438 13.2812 13.4375 13.2812C14.0625 13.2812 14.6312 13.1562 15.1312 12.9C15.4562 12.7375 15.7375 12.5312 15.975 12.2812V13.1H18.3625V4.34375H15.975V5.16875H15.9688ZM15.5 10.4062C15.0875 10.85 14.55 11.075 13.8875 11.075C13.4625 11.075 13.0875 10.975 12.75 10.7688C12.4125 10.5625 12.15 10.2875 11.9625 9.9375C11.775 9.5875 11.6812 9.175 11.6812 8.70625C11.6812 8.25 11.775 7.84375 11.9625 7.49375C12.15 7.14375 12.4062 6.86875 12.7437 6.6625C13.075 6.45625 13.4562 6.35625 13.8937 6.35625C14.3375 6.35625 14.725 6.45625 15.05 6.65625C15.375 6.85625 15.6375 7.1375 15.8312 7.5C16.025 7.8625 16.1187 8.275 16.1187 8.73125C16.1125 9.4 15.9062 9.9625 15.5 10.4062ZM27.0562 4.64375C26.5562 4.325 25.9813 4.1625 25.325 4.1625C24.6625 4.1625 24.0688 4.30625 23.5438 4.6C23.2563 4.75625 23.0125 4.95 22.7938 5.16875V4.34375H20.425V13.0875H22.7938V8.075C22.7938 7.7375 22.8687 7.43125 23.0187 7.1625C23.1687 6.89375 23.375 6.68125 23.6437 6.5375C23.9062 6.39375 24.2125 6.31875 24.55 6.31875C25.0562 6.31875 25.475 6.48125 25.8 6.80625C26.125 7.13125 26.2875 7.55625 26.2875 8.075V13.0875H28.675V7.53125C28.675 6.95 28.5312 6.40625 28.2375 5.89375C27.95 5.38125 27.5562 4.9625 27.0562 4.64375ZM36.75 5.09375C36.525 4.88125 36.2625 4.7 35.9687 4.55C35.4625 4.29375 34.8937 4.1625 34.2687 4.1625C33.4625 4.1625 32.7375 4.3625 32.1063 4.7625C31.475 5.1625 30.9688 5.70625 30.5938 6.39375C30.2188 7.08125 30.0312 7.8625 30.0312 8.73125C30.0312 9.5875 30.2188 10.3625 30.5938 11.05C30.9688 11.7375 31.4688 12.2812 32.1063 12.6812C32.7375 13.0812 33.4625 13.2812 34.2687 13.2812C34.9062 13.2812 35.4812 13.15 35.9875 12.8938C36.2812 12.7438 36.5437 12.5562 36.7687 12.3375V13.1H39.1562V0H36.75V5.09375ZM36.6313 9.9375C36.4438 10.2875 36.1812 10.5625 35.8437 10.7688C35.5062 10.975 35.1187 11.075 34.6875 11.075C34.2625 11.075 33.8875 10.975 33.55 10.775C33.2125 10.575 32.95 10.3 32.7625 9.94375C32.575 9.5875 32.4813 9.175 32.4813 8.70625C32.4813 8.25 32.575 7.8375 32.7625 7.48125C32.95 7.125 33.2063 6.85 33.5438 6.65C33.875 6.45 34.2625 6.35 34.7125 6.35C35.15 6.35 35.5312 6.45 35.8625 6.65625C36.1937 6.8625 36.4562 7.1375 36.6437 7.4875C36.8312 7.8375 36.925 8.25 36.925 8.71875C36.9125 9.18125 36.8188 9.5875 36.6313 9.9375ZM42.4125 0.21875C42.025 0.21875 41.7062 0.350001 41.4562 0.618751C41.2 0.881251 41.075 1.20625 41.075 1.575C41.075 1.9625 41.2 2.28125 41.4562 2.54375C41.7125 2.80625 42.0313 2.93125 42.4125 2.93125C42.8125 2.93125 43.1313 2.8 43.3813 2.54375C43.6313 2.2875 43.75 1.9625 43.75 1.575C43.75 1.2 43.625 0.881251 43.3813 0.618751C43.1375 0.350001 42.8125 0.21875 42.4125 0.21875ZM41.2 13.0875H43.6063V4.34375H41.2V13.0875ZM52.3437 4.64375C51.8437 4.325 51.2687 4.1625 50.6125 4.1625C49.95 4.1625 49.3562 4.30625 48.8312 4.6C48.5437 4.75625 48.3 4.95 48.0812 5.16875V4.34375H45.7125V13.0875H48.0812V8.075C48.0812 7.7375 48.1562 7.43125 48.3062 7.1625C48.4562 6.89375 48.6625 6.68125 48.9312 6.5375C49.1937 6.39375 49.5 6.31875 49.8375 6.31875C50.3437 6.31875 50.7625 6.48125 51.0875 6.80625C51.4125 7.13125 51.575 7.55625 51.575 8.075V13.0875H53.9625V7.53125C53.9625 6.95 53.8187 6.40625 53.525 5.89375C53.2375 5.38125 52.8437 4.9625 52.3437 4.64375ZM61.9312 4.34375V5.075C61.7125 4.8625 61.45 4.68125 61.15 4.53125C60.6437 4.28125 60.0687 4.1625 59.4312 4.1625C58.6437 4.1625 57.9437 4.35 57.3125 4.73125C56.6875 5.1125 56.1937 5.625 55.8375 6.28125C55.4812 6.93125 55.3062 7.66875 55.3062 8.4875C55.3062 9.30625 55.4812 10.05 55.8375 10.7125C56.1937 11.375 56.6875 11.9 57.3125 12.2812C57.9375 12.6625 58.6437 12.85 59.4312 12.85C60.0687 12.85 60.6437 12.725 61.1437 12.4688C61.4375 12.3187 61.6938 12.1375 61.9125 11.925V12.6812C61.9125 13.3187 61.6938 13.8312 61.2625 14.2125C60.825 14.5937 60.25 14.7812 59.525 14.7812C58.9312 14.7812 58.4313 14.675 58.0125 14.4625C57.5938 14.25 57.2188 13.9438 56.8813 13.55L55.3625 15.05C55.8 15.6563 56.3688 16.1188 57.075 16.45C57.7813 16.7813 58.6063 16.95 59.5438 16.95C60.475 16.95 61.2938 16.7688 62.0063 16.4188C62.7188 16.0625 63.275 15.5562 63.6812 14.9062C64.0875 14.2563 64.2875 13.5 64.2875 12.6438V4.34375H61.9312ZM61.775 9.6375C61.6 9.96875 61.35 10.225 61.0312 10.4062C60.7125 10.5875 60.325 10.675 59.8813 10.675C59.4688 10.675 59.1 10.5813 58.7687 10.3938C58.4375 10.2063 58.1812 9.95 58 9.6125C57.8187 9.28125 57.7313 8.90625 57.7313 8.48125C57.7313 8.06875 57.825 7.7 58.0125 7.36875C58.2 7.0375 58.45 6.775 58.775 6.5875C59.0937 6.4 59.475 6.30625 59.9062 6.30625C60.3312 6.30625 60.7 6.4 61.0312 6.5875C61.3562 6.775 61.6062 7.03125 61.7812 7.36875C61.9562 7.7 62.0438 8.075 62.0438 8.5C62.0375 8.93125 61.95 9.30625 61.775 9.6375Z" fill="#1A1916"/><path id="Vector_2" d="M70.9063 0.36248L65.7625 13.0875H68.3688L69.275 10.7187H74.4938L75.3938 13.0875H78.0188L72.9313 0.36248H70.9063ZM70.0688 8.64998L71.9 3.84998L73.7188 8.64998H70.0688ZM78.3125 0.36248V13.0875H80.775V0.36248H78.3125Z" fill="#1A1916"/></g></svg></span>
+  <span class="crumb">›</span>
+  <span class="doc-emoji" aria-hidden="true">📄</span>
+  <span class="doc-name" id="h-doc"></span>
+  <span class="crumb">›</span>
+  <code id="h-el"></code>
+  <span class="badge" id="h-type"></span>
+  <span class="badge" id="h-page"></span>
+  <div id="pills"></div>
+  <a id="backlink">open full viewer</a>
+</header>
+<main>
+  <section id="docpane">
+    <div class="cropwrap"><img id="cropimg" alt="element crop"></div>
+    <div class="meta" id="cropmeta"></div>
+  </section>
+  <div id="sash" role="separator" aria-orientation="vertical"></div>
+  <section id="rightpane">
+    <div id="toolbar">
+      <div class="format-toggle" id="formattoggle">
+        <button data-format="markdown" class="active"><svg class="i" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" rx="1.67" width="15" height="13"/><path d="M5.83 13.33V6.67l2.5 3 2.5-3v6.66M14.17 6.67v6.66m0 0l-1.67-2M14.17 13.33l1.67-2"/></svg><span class="seg-label">Markdown</span></button>
+        <button data-format="json"><span class="seg-label" style="padding-left:0">{ } JSON</span></button>
+      </div>
+    </div>
+    <div id="content">
+      <div id="mdview"><div class="mdrow"><div class="mdlabel" id="mdlabel"></div><div class="mdtext" id="mdtext"></div></div></div>
+      <pre id="jsonview"></pre>
+    </div>
+    <div id="extract">
+      <div class="ex-half">
+        <div class="ex-panel-head"><span class="ptitle">Results</span><span class="badge">fields citing this element</span></div>
+        <div class="ex-scroll"><div class="ex-section" style="margin:8px">
+          <div class="ex-sec-head">Extraction</div><div id="fields"></div></div></div>
+      </div>
+      <div class="ex-half">
+        <div class="ex-panel-head"><span class="ptitle">Schema</span><code id="sc-exid"></code></div>
+        <div class="ex-scroll"><div class="sc-tree" id="sctree"></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script id="ade-data" type="application/json">__ADE_DATA__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("ade-data").textContent);
+const COLORS = { title:"#7A5AF8", marginalia:"#7A5AF8", table:"#2193FD", table_cell:"#2193FD",
+  figure:"#FF5CFF", text:"#32D583", logo:"#F63D68", card:"#DC6803", attestation:"#05DEDE", scan_code:"#EAAA08" };
+// Mini markdown renderer — the same static replica view.html uses (its
+// preprocess/sanitize/inline pipeline), so a non-tiled element's markdown
+// pane renders identically in both: allowlisted tags survive, unknown tags
+// (e.g. <description>) unwrap to their text, comments drop.
+const el = (tag, cls, parent) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (parent) parent.appendChild(n);
+  return n;
+};
+/* ── shared-md-renderer:begin — this block is duplicated verbatim in
+   view_template.html and crop_template.html (each artifact must stay a
+   self-contained single file); edit both copies together —
+   tests/test_templates.py enforces byte-identity ── */
+function preprocessMarkdown(src) {
+  let s = src;
+  // step 2 — normalize "1.  " → "1. " (MemoizedReactMarkdown.tsx:204)
+  s = s.replace(/^(\d+)([.)])\s{2,}/gm, "$1$2 ");
+  // step 3 — zero-width space stops top-level <ol> promotion (:207-210)
+  s = s.replace(/^(\d+)([.)]) /gm, "$1$2​ ");
+  // step 4 — bold nested numbering (:212-214)
+  s = s.replace(/^(\d+\.\d+(\.\d+)*)(\.​)?\s+/gm, "**$1** ");
+  // step 5 — strip 4+ leading spaces so nothing becomes an indented code block (:216)
+  s = s.replace(/^\s{4,}/gm, "");
+  return s;
+}
+
+// Sanitize raw HTML the way rehypeRaw+rehypeSanitize does: allowlisted tags
+// survive, unknown tags are unwrapped to their children, comments dropped.
+const ALLOWED_TAGS = new Set(["figure", "br", "sub", "sup", "em", "strong", "b", "i",
+  "u", "s", "p", "ul", "ol", "li", "blockquote", "code", "pre", "span", "table",
+  "thead", "tbody", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "hr"]);
+function sanitizeInto(sourceNode, target) {
+  for (const node of sourceNode.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.appendChild(renderInline(node.textContent));
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = node.tagName.toLowerCase();
+      if (ALLOWED_TAGS.has(tag)) {
+        const clone = document.createElement(tag);
+        target.appendChild(clone);
+        sanitizeInto(node, clone);
+      } else {
+        sanitizeInto(node, target); // unwrap: keep children, drop the tag
+      }
+    } // comments and everything else: dropped (rehype-sanitize default)
+  }
+}
+
+// Inline markdown: **bold**, `code`, [text](href). Applied to text nodes only.
+function renderInline(text) {
+  const frag = document.createDocumentFragment();
+  const rx = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  let last = 0, m;
+  while ((m = rx.exec(text)) !== null) {
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    if (m[1] !== undefined) el("strong", "", frag).textContent = m[1];
+    else if (m[2] !== undefined) el("code", "", frag).textContent = m[2];
+    else if (/^(https?:|mailto:)/i.test(m[4])) {
+      const a = el("a", "", frag);
+      a.textContent = m[3];
+      a.href = m[4];
+      a.target = "_blank";
+      a.rel = "noreferrer noopener"; // VUI MemoizedReactMarkdown.tsx:319-325
+    } else {
+      // javascript:/data:/relative targets stay plain text — a shared
+      // artifact must not carry clickable script vectors.
+      frag.append(m[3]);
+    }
+    last = rx.lastIndex;
+  }
+  frag.append(text.slice(last));
+  return frag;
+}
+
+function renderMarkdown(src, target) {
+  const text = preprocessMarkdown(src);
+  // Blocks split on blank lines; heading and bullet-list lines get structure,
+  // everything else is a whitespace-pre-line paragraph (VUI p override :276).
+  for (const block of text.split(/\n{2,}/)) {
+    if (!block.trim()) continue;
+    const hasHtml = /<[a-zA-Z!/]/.test(block);
+    if (hasHtml) {
+      // Raw-HTML path (figure/description/br/tables-in-markdown). A <div>
+      // host, not <p>: block-level tags inside a <p> would make the browser
+      // silently restructure the DOM.
+      const scratch = document.implementation.createHTMLDocument("").body;
+      scratch.innerHTML = block;
+      const host = el("div", "rawhtml", target);
+      sanitizeInto(scratch, host);
+      continue;
+    }
+    const h = block.match(/^(#{1,6}) +(.*)$/s);
+    if (h) {
+      el("h" + h[1].length, "", target).appendChild(renderInline(h[2].replace(/\n/g, " ")));
+      continue;
+    }
+    if (/^[-*] /m.test(block)) {
+      const ul = el("ul", "", target);
+      for (const line of block.split("\n")) {
+        el("li", "", ul).appendChild(renderInline(line.replace(/^[-*] /, "")));
+      }
+      continue;
+    }
+    el("p", "", target).appendChild(renderInline(block));
+  }
+}
+/* ── shared-md-renderer:end ── */
+document.title = "ade crop — " + D.element_id;
+document.getElementById("h-doc").textContent = D.source_name || D.job_item_id;
+document.getElementById("h-el").textContent = D.element_id;
+document.getElementById("h-type").textContent = D.type;
+document.getElementById("h-page").textContent = "page " + D.page;
+document.getElementById("backlink").href = "../view.html#element=" + encodeURIComponent(D.element_id);
+document.getElementById("cropimg").src = D.image;
+// atomic_grounding parts, page coords → crop-frame percentages (the crop
+// IS the element's box, so parts rescale within it); same >=2 gating as
+// the document viewer's line sub-boxes.
+(function () {
+  const parts = (D.element_json && D.element_json.atomic_grounding) || [];
+  if (parts.length < 2) return;
+  const wrap = document.querySelector(".cropwrap");
+  const B = D.box, w = B.xmax - B.xmin, h = B.ymax - B.ymin;
+  parts.forEach((g, i) => {
+    const b = g.box;
+    const p = document.createElement("div");
+    p.className = "part";
+    p.title = D.element_id + "-r" + i;
+    p.style.setProperty("--c", COLORS[D.type] || COLORS.text);
+    p.style.left = ((b.xmin - B.xmin) / w * 100) + "%";
+    p.style.top = ((b.ymin - B.ymin) / h * 100) + "%";
+    p.style.width = ((b.xmax - b.xmin) / w * 100) + "%";
+    p.style.height = ((b.ymax - b.ymin) / h * 100) + "%";
+    wrap.appendChild(p);
+  });
+})();
+document.getElementById("cropmeta").textContent =
+  D.width + "x" + D.height + " px @ " + D.dpi + " dpi · box [" +
+  ["xmin","ymin","xmax","ymax"].map(k => D.box[k].toFixed(4)).join(", ") + "]";
+const row = document.querySelector(".mdrow");
+row.style.setProperty("--c", COLORS[D.type] || COLORS.text);
+document.getElementById("mdlabel").textContent = D.type;
+// Markdown tiled by atomic parts (the viewer's regionSegments path):
+// grounded segments become hoverable spans synced with the crop's line
+// boxes; gaps stay plain. Code-point slicing, ranges are code points.
+(function () {
+  const host = document.getElementById("mdtext");
+  const parts = ((D.element_json && D.element_json.atomic_grounding) || [])
+    .map((g, i) => ({ start: g.range.start, end: g.range.end, i }))
+    .sort((a, b) => a.start - b.start);
+  if (parts.length < 2 || !D.text) {
+    // No line-box tiling to sync (e.g. a figure): render markdown the way
+    // view.html does, so <figure> stays a real element and <description>
+    // unwraps to its text — no raw tags shown. Same branch view.html takes
+    // for an element with < 2 atomic parts.
+    if (!D.text) { host.textContent = "(no text)"; return; }
+    renderMarkdown(D.text, el("div", "mdbody", host));
+    return;
+  }
+  const chars = Array.from(D.text);
+  const base = D.element_json.grounding.range.start;
+  let cursor = 0;
+  const sync = (i, on) => {
+    document.querySelectorAll(`.part[title$="-r${i}"], .region[data-r="${i}"]`)
+      .forEach(n => n.classList.toggle("hov", on));
+  };
+  for (const p of parts) {
+    let s = Math.max(p.start - base, cursor);
+    const e = Math.min(p.end - base, chars.length);
+    if (s >= e) continue;
+    if (s > cursor) host.append(chars.slice(cursor, s).join(""));
+    // leading newlines stay plain text — a span that begins with the
+    // previous line's break would extend its hover zone up a line
+    while (s < e && chars[s] === "\n") { host.append("\n"); s++; }
+    if (s >= e) continue;
+    const span = document.createElement("span");
+    span.className = "region";
+    span.dataset.r = p.i;
+    span.style.setProperty("--c", COLORS[D.type] || COLORS.text);
+    span.textContent = chars.slice(s, e).join("");
+    span.onmouseenter = () => sync(p.i, true);
+    span.onmouseleave = () => sync(p.i, false);
+    host.appendChild(span);
+    cursor = e;
+  }
+  if (cursor < chars.length) host.append(chars.slice(cursor).join(""));
+  // reverse: hovering a line box on the crop highlights its span
+  document.querySelectorAll(".part").forEach(part => {
+    const i = part.title.match(/-r(\d+)$/)[1];
+    part.onmouseenter = () => sync(i, true);
+    part.onmouseleave = () => sync(i, false);
+  });
+})();
+(function () {
+  const out = document.getElementById("jsonview");
+  const json = JSON.stringify(D.element_json, null, 2);
+  const rx = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|(true|false|null)/g;
+  let last = 0, m;
+  const put = (cls, text) => { const s = document.createElement("span"); s.className = cls; s.textContent = text; out.appendChild(s); };
+  while ((m = rx.exec(json)) !== null) {
+    out.append(json.slice(last, m.index));
+    if (m[1] !== undefined) put(m[2] ? "j-key" : "j-str", m[1] + (m[2] || ""));
+    else if (m[3] !== undefined) put("j-num", m[3]);
+    else put("j-lit", m[4]);
+    last = rx.lastIndex;
+  }
+  out.append(json.slice(last));
+})();
+// Parse | Extract pills, like the viewer: Extract only when fields cite
+// this element; Parse tab = element text/JSON, Extract tab = the fields.
+(function () {
+  const pills = document.getElementById("pills");
+  const mk = (label, tab, active) => {
+    const b = document.createElement("button");
+    b.className = "pill" + (active ? " active" : "");
+    b.innerHTML = '<span class="pill-label"></span>';
+    b.querySelector(".pill-label").textContent = label;
+    b.onclick = () => {
+      document.querySelectorAll(".pill").forEach(p => p.classList.toggle("active", p === b));
+      const parse = tab === "parse";
+      document.getElementById("toolbar").style.display = parse ? "flex" : "none";
+      document.getElementById("mdview").style.display = parse ? "block" : "none";
+      document.getElementById("jsonview").style.display = "none";
+      if (parse) document.querySelector('#formattoggle button[data-format="markdown"]').classList.add("active"),
+        document.querySelector('#formattoggle button[data-format="json"]').classList.remove("active");
+      document.getElementById("content").style.display = parse ? "block" : "none";
+      document.getElementById("extract").style.display = parse ? "none" : "flex";
+    };
+    pills.appendChild(b);
+  };
+  mk("Parse", "parse", true);
+  if ((D.fields || []).length) {
+    const c = document.createElement("span");
+    c.className = "connector";
+    pills.appendChild(c);
+    mk("Extract", "extract", false);
+  }
+})();
+// resizable split — same drag mechanics as view.html's sash; the pills
+// track the divider like the viewer (tabsLeftOffset).
+(function () {
+  const sash = document.getElementById("sash");
+  const doc = document.getElementById("docpane");
+  const pills = document.getElementById("pills");
+  const place = () => { pills.style.left = doc.getBoundingClientRect().width + "px"; };
+  sash.addEventListener("pointerdown", down => {
+    down.preventDefault();
+    sash.setPointerCapture(down.pointerId);
+    document.body.classList.add("resizing");
+    const move = ev => {
+      const main = document.querySelector("main").getBoundingClientRect();
+      doc.style.width = Math.min(Math.max(ev.clientX - main.left, 300), main.width - 300) + "px";
+      place();
+    };
+    const up = () => {
+      document.body.classList.remove("resizing");
+      sash.removeEventListener("pointermove", move);
+      sash.removeEventListener("pointerup", up);
+    };
+    sash.addEventListener("pointermove", move);
+    sash.addEventListener("pointerup", up);
+  });
+  window.addEventListener("resize", place);
+  place();
+})();
+document.querySelectorAll("#formattoggle button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("#formattoggle button").forEach(x => x.classList.toggle("active", x === b));
+    document.getElementById("mdview").style.display = b.dataset.format === "markdown" ? "block" : "none";
+    document.getElementById("jsonview").style.display = b.dataset.format === "json" ? "block" : "none";
+  };
+});
+// Schema panel, scoped to the crop: the citing extraction's schema tree
+// (viewer's SchemaTreeEditor read-only rows) filtered to the citing field
+// paths and their ancestors; citing leaves carry the green highlight.
+(function () {
+  const sc = (D.schemas || [])[0];
+  if (!sc) return;
+  document.getElementById("sc-exid").textContent = sc.job_item_id;
+  const cited = new Set((D.fields || []).map(f => f.field.replace(/\[\d+\]/g, "")));
+  const related = p => [...cited].some(c => c === p || c.startsWith(p + "."));
+  const badge = spec => {
+    const d = spec.type === "array" ? (spec.items && spec.items.type) || "object" : spec.type || "string";
+    const n = d === "integer" ? "number" : d;
+    const label = n.charAt(0).toUpperCase() + n.slice(1);
+    return { cls: "t-" + (["object","string","number","boolean","enum"].includes(n) ? n : "string"),
+      label: spec.type === "array" ? "Array of " + label : label };
+  };
+  (function tree(node, container, prefix) {
+    for (const [name, spec] of Object.entries((node && node.properties) || {})) {
+      const path = prefix ? prefix + "." + name : name;
+      if (!related(path)) continue; // scoped: citing paths + ancestors only
+      const row = document.createElement("div");
+      row.className = "sc-row";
+      row.dataset.spath = path;
+      container.appendChild(row);
+      const b = badge(spec);
+      row.innerHTML = '<span class="sname"></span> <span class="stype ' + b.cls + '"></span>';
+      row.querySelector(".sname").textContent = name;
+      row.querySelector(".stype").textContent = b.label;
+      if (spec.description) {
+        const d = document.createElement("div");
+        d.className = "sdesc";
+        d.textContent = d.title = spec.description;
+        row.appendChild(d);
+      }
+      const child = spec.type === "array" ? spec.items : spec;
+      if (child && child.properties) {
+        // expand/collapse chevron, as in the viewer's schema tree
+        const btn = document.createElement("button");
+        btn.className = "schevbtn";
+        btn.innerHTML = '<svg viewBox="0 0 12 12" fill="none"><path stroke-width="1.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M4.5 3L7.5 6L4.5 9"/></svg>';
+        row.appendChild(btn);
+        const kids = document.createElement("div");
+        kids.className = "sc-kids";
+        container.appendChild(kids);
+        tree(child, kids, path);
+        btn.onclick = ev => {
+          ev.stopPropagation();
+          const closed = row.classList.toggle("closed");
+          kids.style.display = closed ? "none" : "";
+        };
+      }
+    }
+  })(sc.schema, document.getElementById("sctree"), "");
+})();
+// Results: the citing fields reassembled into a scoped extraction object,
+// rendered as token-colored JSON lines like the main viewer's extract
+// Results; leaf lines hover-highlight the matching schema rows.
+(function () {
+  const host = document.getElementById("fields");
+  if (!(D.fields || []).length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "No stored extraction field cites this element.";
+    host.appendChild(d);
+    return;
+  }
+  const scoped = {};
+  for (const f of D.fields) {
+    let node = scoped;
+    const parts = f.field.replace(/\[\d+\]/g, "").split(".");
+    parts.forEach((key, i) => {
+      if (i === parts.length - 1) node[key] = f.value;
+      else node = node[key] = node[key] || {};
+    });
+  }
+  const stack = [];
+  for (const line of JSON.stringify(scoped, null, 2).split("\n")) {
+    const div = document.createElement("div");
+    div.className = "ex-json-line";
+    host.appendChild(div);
+    const key = line.match(/^\s*"((?:[^"\\]|\\.)*)"\s*:/);
+    const opens = /[[{]\s*,?\s*$/.test(line);
+    if (/^\s*[\]}]/.test(line)) stack.pop();
+    if (key && !opens) div.dataset.path = [...stack, key[1]].join(".");
+    if (opens && key) stack.push(key[1]);
+    const rx = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|(true|false|null)/g;
+    let last = 0, m;
+    while ((m = rx.exec(line)) !== null) {
+      div.append(line.slice(last, m.index));
+      const s = document.createElement("span");
+      s.className = m[1] !== undefined ? (m[2] ? "j-key" : "j-str") : m[3] !== undefined ? "j-num" : "j-lit";
+      s.textContent = m[1] !== undefined ? m[1] + (m[2] || "") : (m[3] !== undefined ? m[3] : m[4]);
+      div.appendChild(s);
+      last = rx.lastIndex;
+    }
+    div.append(line.slice(last));
+    if (div.dataset.path) {
+      const rows = () => [...document.querySelectorAll(".sc-row")].filter(r =>
+        div.dataset.path === r.dataset.spath || div.dataset.path.startsWith(r.dataset.spath + "."));
+      div.onmouseenter = () => rows().forEach(r => r.classList.add("hl"));
+      div.onmouseleave = () => rows().forEach(r => r.classList.remove("hl"));
+    }
+  }
+})();
+</script>
+</body>
+</html>
