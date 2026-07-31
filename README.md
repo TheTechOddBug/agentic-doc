@@ -1,7 +1,5 @@
 # ade-cli
 
-> **This repository was [`agentic-doc`](https://github.com/landing-ai/ade-cli/tree/legacy)** — the original Agentic Document Extraction SDK. The SDK is preserved unchanged on the [`legacy`](https://github.com/landing-ai/ade-cli/tree/legacy) branch; library users should use [`landingai-ade`](https://pypi.org/project/landingai-ade/). This repo now ships **ade-cli**, the official ADE command line.
-
 [![Release](https://img.shields.io/github/v/release/landing-ai/ade-cli)](https://github.com/landing-ai/ade-cli/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -276,6 +274,14 @@ installer ends by naming that absolute path. Non-interactive shells (CI,
 cron, agent harnesses) source no rc file, so a PATH entry your login shell
 has may not be there — call the absolute path, or export
 `PATH="$HOME/.ade/bin:$PATH"` in the job itself.
+
+## History
+
+This repository was **`agentic-doc`**, the original Agentic Document
+Extraction SDK. The SDK is preserved unchanged — and no longer
+developed — on the
+[`legacy`](https://github.com/landing-ai/ade-cli/tree/legacy) branch;
+since 2026-07-31 this repo ships the ADE CLI.
 
 ## License
 
