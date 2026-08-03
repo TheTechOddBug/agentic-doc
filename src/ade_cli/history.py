@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from datetime import datetime
 
 import typer
 
@@ -118,6 +119,9 @@ def _plain_line(record: dict, indent: bool) -> str:
         # ("production") so columns stay aligned; items from before the
         # environment field read as "?", never a guessed default.
         + f"{record['state']:<10}  {record.get('environment') or '?':<10}  "
+        # When the run was submitted — the ordering key, so the listing's
+        # oldest-first order is legible. Local time, like the table.
+        + f"{_submitted_cell(record):<16}  "
         + f"{items.compact_params(record)}  "
         + (record["source"] or "?")
     )
@@ -156,35 +160,77 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
     console = Console(width=width)
 
     cells = [
-        (
-            ("  " if indent else "") + record["job_item_id"],
+        [
+            # Child rows (extracts under their parse) carry a tree marker,
+            # not bare indentation — two leading spaces read as misalignment.
+            ("└ " if indent else "") + record["job_item_id"],
             record["kind"],
             record["state"],
             # Items from before the environment field read as "?", never a
             # guessed default.
             record.get("environment") or "?",
+            _submitted_cell(record),
             items.compact_params(record),
-        )
+        ]
         for record, indent in rows
     ]
-    # Fix the five data columns at their content width so rich never
-    # shrinks them; SOURCE alone absorbs the terminal width.
-    headers = ("JOB ITEM", "KIND", "STATE", "ENV", "PARAMS")
+    # "(local)" rather than today's zone abbreviation: each row converts
+    # its own epoch with the zone rules in effect *then*, so one history
+    # can legitimately span DST names — a current-time label would
+    # mislabel half of it.
+    headers = ["JOB ITEM", "KIND", "STATE", "ENV", "SUBMITTED (local)", "PARAMS"]
     widths = [
         max(len(header), *(len(row[i]) for row in cells))
         for i, header in enumerate(headers)
     ]
+    # What a truncated params cell must keep visible: the model and the
+    # tier — only the middle (a pages list) may elide.
+    elided = [items.elided_params(record) for record, _ in rows]
+    keep = max(len("PARAMS"), *(len(text) for text in elided))
+    # SUBMITTED is the first column to yield: on a terminal too narrow to
+    # hold it alongside the un-elidable params and the SOURCE floor it
+    # drops entirely — a partial timestamp is noise, and the exact epoch
+    # lives in --json.
+    if console.width < sum(widths[:5]) + min(keep, 40) + 8 + _overhead(len(headers)):
+        headers.pop(4)
+        widths.pop(4)
+        cells = [row[:4] + row[5:] for row in cells]
+    # The identity columns (id, kind, state, env, submitted) are naturally
+    # narrow and fix at content width so rich never shrinks them. PARAMS
+    # takes what the terminal leaves after those plus a floor for SOURCE —
+    # so no column ever pushes another off-screen.
+    last = len(headers) - 1  # PARAMS
+    overhead = _overhead(len(headers))
+    widths[last] = min(
+        widths[last],
+        40,  # a params cell is a summary; past this, SOURCE needs it more
+        max(12, console.width - sum(widths[:last]) - overhead - 12),
+    )
+    # A cell that overflows the column swaps to its elided form (model and
+    # tier intact) — even when the elided form itself must fold, folding
+    # the bounded model/…/tier beats folding a long pages list.
+    for row, short in zip(cells, elided):
+        if len(row[last]) > widths[last]:
+            row[last] = short
     table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
-    for header, width_ in zip(headers, widths):
+    for header, width_ in zip(headers[:last], widths[:last]):
         # width alone is advisory under overflow; min_width pins it so a
         # narrow terminal crops SOURCE, never the identity columns.
         table.add_column(header, no_wrap=True, width=width_, min_width=width_)
+    # overflow="fold" wraps params onto continuation lines within the cell
+    # (even a single long token); the full value lives in --json.
+    table.add_column(
+        "PARAMS", width=widths[last], min_width=widths[last], overflow="fold"
+    )
     table.add_column("SOURCE", no_wrap=True)
 
-    # Budget for SOURCE: what the other columns and their padding leave
-    # over. Sources truncate from the left so the basename stays visible;
-    # the full source lives in --json.
-    budget = max(16, console.width - sum(widths) - 2 * 6 - 2)
+    # Budget for SOURCE: exactly what the other columns and the overhead
+    # leave over, so the table never exceeds the terminal. Sources truncate
+    # from the left so the basename stays visible; the full source lives
+    # in --json.
+    budget = max(8, console.width - sum(widths) - overhead)
+    # Annotation rows put their text in the SOURCE column, blank elsewhere.
+    blanks = [""] * len(headers)
     for (record, _indent), row in zip(rows, cells):
         source = tilde(record["source"]) if record["source"] else "?"
         if (record.get("parse") or {}).get("missing"):
@@ -195,8 +241,7 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
             row[0],
             row[1],
             Text(row[2], style=_STATE_STYLES.get(row[2], "")),
-            row[3],
-            row[4],
+            *row[3:],
             source,
         )
         if record["reason"]:
@@ -205,7 +250,7 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
             reason = f"reason: {record['reason']}"
             if len(reason) > budget:
                 reason = reason[: budget - 1] + "…"
-            table.add_row("", "", "", "", "", Text(reason, style="dim"))
+            table.add_row(*blanks, Text(reason, style="dim"))
         if record.get("schema_violation_error"):
             # A partial extraction (#118): advisory, like the playground's
             # amber toast — yellow, never the failure red.
@@ -215,7 +260,7 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
             )
             if len(partial) > budget:
                 partial = partial[: budget - 1] + "…"
-            table.add_row("", "", "", "", "", Text(partial, style="yellow"))
+            table.add_row(*blanks, Text(partial, style="yellow"))
         if record.get("warnings"):
             warn = (
                 f"warnings: {record['warnings']} server warning(s) "
@@ -223,8 +268,29 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
             )
             if len(warn) > budget:
                 warn = warn[: budget - 1] + "…"
-            table.add_row("", "", "", "", "", Text(warn, style="yellow"))
+            table.add_row(*blanks, Text(warn, style="yellow"))
     console.print(table)
+
+
+def _submitted_cell(record: dict) -> str:
+    """The compact submission time, in this machine's local zone with the
+    rules in effect at that epoch (DST included) — listings are read
+    where the runs happened. Items predating the field read as "?"; the
+    raw epoch stays in --json (``submitted_at``)."""
+    epoch = record.get("submitted_at")
+    if epoch is None:
+        return "?"
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
+
+
+def _overhead(columns: int) -> int:
+    """rich's per-column cost under box.SIMPLE with pad_edge=False, for
+    ``columns`` data columns plus SOURCE: two padding cells per column
+    minus the outer pair, plus one divider cell between columns.
+    Undercounting this is what used to tip rich into its overflow crop
+    cascade, which shaves even min_width-pinned columns."""
+    total = columns + 1  # + SOURCE
+    return (2 * total - 2) + (total - 1)
 
 
 @history_app.command("clear")

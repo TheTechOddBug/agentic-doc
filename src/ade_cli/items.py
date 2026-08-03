@@ -149,7 +149,11 @@ def item_record(store: JobStore, item_id: str) -> dict:
         record["page_count"] = current.get("page_count")
         record["failed_pages"] = current.get("failed_pages")
     else:
-        record["fields"] = sorted((meta.get("schema") or {}).get("properties") or [])
+        # None when the commit record carries no schema yet (pending items,
+        # pre-field records) — distinct from a schema whose properties are
+        # genuinely empty, which reads as [] and counts as "0 fields".
+        properties = (meta.get("schema") or {}).get("properties")
+        record["fields"] = sorted(properties) if properties is not None else None
         # The partial-success markers (#118): the violation message and the
         # server-warning count — read from the commit record, so listings
         # can say so without opening extract.json (which keeps the full
@@ -285,7 +289,9 @@ def artifact_index(store: JobStore, item_id: str) -> list[dict]:
 
 def compact_params(record: dict) -> str:
     """The one-line params rendering history rows and the sidebar share:
-    model, pages, tier for parse; schema field list + model for extract."""
+    model, pages, tier for parse; model + schema field count for extract.
+    The field *names* stay out — a big schema would drown every other
+    column — the full list lives in ``--json``."""
     params = record.get("params") or {}
     if record["kind"] == "parse":
         parts = [params.get("model") or "?"]
@@ -295,10 +301,29 @@ def compact_params(record: dict) -> str:
         if params.get("tier"):
             parts.append(params["tier"])
         return " · ".join(parts)
-    fields = record.get("fields") or []
-    parts = [", ".join(fields) or "?"]
-    if params.get("model"):
-        parts.append(params["model"])
+    parts = [params.get("model") or "?"]
+    fields = record.get("fields")
+    if fields is not None:
+        # [] is a real (if odd) schema — "0 fields" — while None means
+        # the item has no schema metadata to count (nothing rendered).
+        plural = "s" if len(fields) != 1 else ""
+        parts.append(f"{len(fields)} field{plural}")
+    return " · ".join(parts)
+
+
+def elided_params(record: dict) -> str:
+    """``compact_params`` with the elidable middle squeezed out: the model
+    and the tier must stay visible wherever params render, so a parse
+    cell that cannot fit whole drops its pages list to a ``…`` marker.
+    Extract summaries are already bounded and pass through unchanged."""
+    params = record.get("params") or {}
+    if record["kind"] != "parse":
+        return compact_params(record)
+    parts = [params.get("model") or "?"]
+    if (params.get("options") or {}).get("pages"):
+        parts.append("…")
+    if params.get("tier"):
+        parts.append(params["tier"])
     return " · ".join(parts)
 
 
