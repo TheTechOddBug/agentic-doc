@@ -625,6 +625,77 @@ def test_a_schema_that_is_neither_a_file_nor_json_is_a_usage_error(cli, document
     assert "schema" in result.stdout.lower()
 
 
+# An inline schema longer than a filesystem name component (255 bytes on
+# macOS/Linux): the file probe must not blow up on it (#143).
+LONG_INLINE_SCHEMA = {
+    "type": "object",
+    "properties": {f"survey_question_{i:02d}": {"type": "string"} for i in range(20)},
+}
+
+
+def test_long_inline_schema_parses_as_inline_json(cli, document):
+    parse_id = parse_doc(cli, document)
+    inline = json.dumps(LONG_INLINE_SCHEMA)
+    assert len(inline) > 255  # past the ENAMETOOLONG threshold (#143)
+    cli.transport.respond(202, {"job_id": "extract-0001"})
+    cli.transport.respond(200, completed_extract_job())
+    result = cli.invoke("extract", parse_id, "--schema", inline, env=AUTH_ENV)
+    assert result.exit_code == 0, result.stdout
+
+    (submit,) = extract_posts(cli)
+    assert json.loads(submit.content)["schema"] == LONG_INLINE_SCHEMA
+
+
+def test_long_inline_non_json_schema_is_a_structured_usage_error(cli, document):
+    # Longer than any filename component and not JSON: previously an
+    # unhandled OSError; must be the same structured usage error a short
+    # bad spec gets (#143).
+    spec = "not json " * 40
+    assert len(spec) > 255
+    result = cli.invoke(
+        "extract", "some-item-id", "--schema", spec, "--json", env=AUTH_ENV
+    )
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "bad_schema"
+
+
+def test_an_unreadable_schema_file_is_a_structured_usage_error(
+    cli, document, tmp_path, monkeypatch
+):
+    # An OS-level read failure, simulated rather than provoked via
+    # chmod(0) — root (containerized CI) reads through permission bits.
+    locked = tmp_path / "locked-schema.json"
+    locked.write_text(json.dumps(SCHEMA))
+
+    from pathlib import Path
+
+    real = Path.read_text
+
+    def deny(self, *args, **kwargs):
+        if self == locked:
+            raise PermissionError(f"simulated unreadable file: {self}")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny)
+    result = cli.invoke(
+        "extract", "some-item-id", "--schema", str(locked), "--json", env=AUTH_ENV
+    )
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "bad_schema"
+
+
+def test_a_non_utf8_schema_file_is_a_structured_usage_error(cli, tmp_path):
+    # read_text raises UnicodeDecodeError, not OSError — it must exit
+    # through the same structured path, never a raw traceback (#143).
+    binary = tmp_path / "binary-schema.json"
+    binary.write_bytes(b"\xff\xfe\x00\x01 not utf-8")
+    result = cli.invoke(
+        "extract", "some-item-id", "--schema", str(binary), "--json", env=AUTH_ENV
+    )
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "bad_schema"
+
+
 # --- completion output discoverability (#34) ---
 
 
