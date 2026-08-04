@@ -64,11 +64,11 @@ terminal required either way.
 2. **Discover element ids** (local, instant, no API call):
 
    ```
-   ade find JOB_ID "total revenue" --json
-   ade find JOB_ID --type table_cell --page 3 --json
+   ade find JOB_ITEM_ID "total revenue" --json
+   ade find JOB_ITEM_ID --type table_cell --page 3 --json
    ```
 
-   (`--job JOB_ID` is the equivalent flag spelling — repeat it to search
+   (`--job JOB_ITEM_ID` is the equivalent flag spelling — repeat it to search
    several items in one call.)
 
    Matches are citation records: `{job_item_id, element_id, type, page,
@@ -78,7 +78,7 @@ terminal required either way.
 3. **Extract** structured data against a JSON Schema:
 
    ```
-   ade extract JOB_ID --schema schema.json --json
+   ade extract JOB_ITEM_ID --schema schema.json --json
    ```
 
    The result is its own job item. The payload's `extraction` key is the
@@ -89,13 +89,13 @@ terminal required either way.
    empty-valued fields (blank cells, absent optionals — nothing to
    ground) are labeled `empty`. Neither is ever silently dropped.
 
-4. **Cite and show.** `ade view JOB_ID --json` builds a
+4. **Cite and show.** `ade view JOB_ITEM_ID --json` builds a
    self-contained HTML viewer; deep links are the citation contract:
 
    ```
-   ade view JOB_ID --element-id ELEMENT_ID --json   # emits view.html#element=ELEMENT_ID
-   ade crop JOB_ID --element-id ELEMENT_ID --json   # PNG of that element's region
-   ade crop JOB_ID --type figure --json             # every figure, one command
+   ade view JOB_ITEM_ID --element-id ELEMENT_ID --json   # emits view.html#element=ELEMENT_ID
+   ade crop JOB_ITEM_ID --element-id ELEMENT_ID --json   # PNG of that element's region
+   ade crop JOB_ITEM_ID --type figure --json             # every figure, one command
    ```
 
    End answers with one deep link per job item, citing element ids.
@@ -109,12 +109,12 @@ terminal required either way.
 Every parse the CLI ever runs is a reusable job item. Given a document
 path, `extract -d FILE --schema …` reuses the latest completed parse of
 that path+content (logged in the summary; no parse billed). If none
-exists, it runs a **standalone parse job first** — a normal, top-level
+exists, it runs a **standalone parse first** — a normal, top-level
 parse item, exactly as if you had run `parse -d` — then the extraction
-referencing it: two billable jobs, both itemised. Repeat `extract -d`
+referencing it: two billable runs, both itemised. Repeat `extract -d`
 runs of the same file then reuse that parse, so it bills exactly once.
 
-Prefer the explicit two-step (`parse -d`, then `extract JOB_ID`) when
+Prefer the explicit two-step (`parse -d`, then `extract JOB_ITEM_ID`) when
 you want the same parse to feed several schemas — the id makes the reuse
 visible.
 
@@ -122,10 +122,10 @@ visible.
 
 Wait expiry is a normal outcome, not an error. If the poll budget
 (`--wait`, default 600s) runs out, the command exits with code 3 and a
-`{"status": "pending", "job_id": …, "job_item_id": …}` payload while the
-job continues server-side (submitted work always completes and bills —
+`{"status": "pending", "run_id": …, "job_item_id": …}` payload while the
+run continues server-side (submitted work always completes and bills —
 there is no cancel). **The recovery gesture is always the same command,
-re-run.** A re-run joins the recorded job; it never resubmits and never
+re-run.** A re-run joins the recorded run; it never resubmits and never
 re-bills. Interrupts (Ctrl-C) stop the waiting, not the work — same
 gesture. `--wait 0` submits and returns immediately.
 
@@ -133,7 +133,7 @@ Submit-and-return, then collect later — the pending payload carries the
 id too, so this works in both steps:
 
 ```
-JOB=$(ade parse -d report.pdf --wait 0 --id-only)   # exit 3, job running
+JOB=$(ade parse -d report.pdf --wait 0 --id-only)   # exit 3, run continuing
 ade parse -d report.pdf --json                       # re-run: resumes, never re-bills
 ```
 
@@ -144,8 +144,8 @@ ade parse -d report.pdf --json                       # re-run: resumes, never re
 | 0 | ok | Success — the payload is on stdout. |
 | 1 | failed | The run failed or the target cannot serve the request. |
 | 2 | usage | The invocation itself was wrong; nothing was submitted. |
-| 3 | pending | Wait budget expired; the job continues server-side. Re-run the same command to resume. |
-| 4 | rate_limited | Submit was rate-limited and the wait budget ran out before a job existed; nothing billed. Re-run to retry. |
+| 3 | pending | Wait budget expired; the run continues server-side. Re-run the same command to resume. |
+| 4 | rate_limited | Submit was rate-limited and the wait budget ran out before a run existed; nothing billed. Re-run to retry. |
 
 ## Reading the store directly
 
@@ -162,7 +162,7 @@ the summaries print each item's store path.
 - `evidence.json` — the field→box join (element ids, pages, boxes)
 
 Prefer `find` over loading `elements.json` into context: it returns
-joined records, not lines. `history clear JOB_ID` deletes an item;
+joined records, not lines. `history clear JOB_ITEM_ID` deletes an item;
 clearing a parse item cascades to the extractions referencing it.
 
 ## Sharp edges

@@ -97,7 +97,7 @@ def test_same_item_and_schema_twice_is_one_submit_total(cli, document, schema_fi
     payload = json.loads(again.stdout)
     assert payload["status"] == "extracted"
     assert payload["cached"] is True
-    assert payload["job_id"] == first["job_id"]  # still traceable to the bill
+    assert payload["run_id"] == first["run_id"]  # still traceable to the bill
     assert len(extract_posts(cli)) == 1
 
 
@@ -325,7 +325,7 @@ def test_forced_reparse_marks_extraction_stale_and_same_schema_reextracts(
         result=extract_result(markdown=new_markdown, job_id="extract-0002"),
     )
     assert payload["cached"] is False
-    assert payload["job_id"] == "extract-0002"
+    assert payload["run_id"] == "extract-0002"
     assert payload["job_item_id"] == first["job_item_id"]  # same item, re-run
     assert len(extract_posts(cli)) == 2
     assert json.loads(extract_posts(cli)[-1].content)["markdown"] == new_markdown
@@ -415,7 +415,7 @@ def test_extract_poll_rides_out_a_transient_5xx(cli, document, schema_file):
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "extract-0001"
+    assert json.loads(result.stdout)["run_id"] == "extract-0001"
     assert len(extract_posts(cli)) == 1  # never a blind resubmit
 
 
@@ -431,7 +431,7 @@ def test_wait_zero_saves_the_ticket_and_rerun_resumes_without_resubmit(
     assert first.exit_code == 3  # pending is a normal outcome, not an error
     payload = json.loads(first.stdout)
     assert payload["status"] == "pending"
-    assert payload["job_id"] == "extract-0001"
+    assert payload["run_id"] == "extract-0001"
     (extract_dir,) = extract_item_dirs(cli)
     assert json.loads((extract_dir / "job.json").read_text())["job_id"] == "extract-0001"
 
@@ -504,7 +504,7 @@ def test_failed_extract_is_reported_once_then_resubmitted_fresh(
     payload = complete_extract(
         cli, parse_id, "--schema", str(schema_file), job_id="extract-0002"
     )
-    assert payload["job_id"] == "extract-0002"
+    assert payload["run_id"] == "extract-0002"
     assert len(extract_posts(cli)) == 2  # one fresh resubmit, not a cache hit
 
 
@@ -534,7 +534,7 @@ def test_unreadable_extract_completion_rejoins_the_same_job_never_resubmits(
         "extract", parse_id, "--schema", str(schema_file), "--json", env=AUTH_ENV
     )
     assert second.exit_code == 0
-    assert json.loads(second.stdout)["job_id"] == "extract-0001"
+    assert json.loads(second.stdout)["run_id"] == "extract-0001"
     assert len(extract_posts(cli)) == 1  # exactly one submit across both runs
 
 
@@ -623,6 +623,77 @@ def test_a_schema_that_is_neither_a_file_nor_json_is_a_usage_error(cli, document
     )
     assert result.exit_code == 2
     assert "schema" in result.stdout.lower()
+
+
+def test_an_empty_schema_is_refused_before_any_api_call(cli, document):
+    """#154: an empty-properties schema is valid JSON Schema, but the
+    server would process (and bill) the whole document to extract nothing
+    — refused locally, before submit, like the --pages/--options conflict."""
+    parse_id = parse_doc(cli, document)
+    for spec in ('{"type": "object", "properties": {}}', '{"type": "object"}'):
+        result = cli.invoke(
+            "extract", parse_id, "--schema", spec, "--json", env=AUTH_ENV
+        )
+        assert result.exit_code == 2, result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["error"] == "empty_schema"
+        assert "not sent" in payload["message"]
+    # Nothing beyond the seeded parse ever reached the transport.
+    assert extract_posts(cli) == []
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # Composition with real fields somewhere reachable must submit —
+        # a false block would be worse than a billed empty run.
+        {"type": "object", "allOf": [{"properties": {"total": {"type": "string"}}}]},
+        {"type": "object", "anyOf": [{}, {"properties": {"total": {"type": "string"}}}]},
+        {"type": "array", "items": {"properties": {"total": {"type": "string"}}}},
+        {"type": "object", "patternProperties": {"^x-": {"type": "string"}}},
+        # $ref is unresolvable locally: give the server the benefit.
+        {"$ref": "#/$defs/invoice", "$defs": {"invoice": {"properties": {}}}},
+    ],
+)
+def test_a_composing_schema_with_reachable_fields_still_submits(
+    cli, document, schema
+):
+    """The empty-schema gate must not false-positive on composition — a
+    $ref/allOf/items schema has fields even with no top-level properties
+    map."""
+    parse_id = parse_doc(cli, document)
+    cli.transport.respond(202, {"job_id": "extract-0001"})
+    cli.transport.respond(200, completed_extract_job())
+    result = cli.invoke(
+        "extract", parse_id, "--schema", json.dumps(schema), env=AUTH_ENV
+    )
+    assert result.exit_code == 0, result.stdout
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # Empty composition shells define nothing — mere presence of a
+        # composition key must not bypass the gate.
+        {"type": "object", "allOf": []},
+        {"type": "object", "allOf": [{}]},
+        {"type": "object", "anyOf": [{"type": "string"}]},
+        {"type": "object", "patternProperties": {}},
+        {"type": "array", "items": {}},
+        {"type": "object", "properties": {}, "allOf": [{"properties": {}}]},
+    ],
+)
+def test_an_empty_composition_shell_is_still_refused(cli, document, schema):
+    parse_id = parse_doc(cli, document)
+    seen = len(cli.transport.requests)
+
+    result = cli.invoke(
+        "extract", parse_id, "--schema", json.dumps(schema), "--json", env=AUTH_ENV
+    )
+
+    assert result.exit_code == 2, result.stdout
+    assert json.loads(result.stdout)["error"] == "empty_schema"
+    assert len(cli.transport.requests) == seen  # nothing submitted
 
 
 # An inline schema longer than a filesystem name component (255 bytes on
@@ -741,7 +812,7 @@ def test_extract_json_carries_the_contract_fields(cli, document, schema_file):
     assert payload["parse_job_item_id"] == parse_id
     assert payload["artifacts"] == ["extract.json", "evidence.json"]
     assert set(payload) == {
-        "status", "job_id", "job_item_id", "parse_job_item_id", "environment",
+        "status", "run_id", "job_item_id", "parse_job_item_id", "environment",
         "version", "credits", "tier", "extraction", "fields", "ungroundable",
         "empty_fields", "schema_violation_error", "warnings", "evidence",
         "cached", "stored", "store_dir", "artifacts",
@@ -865,3 +936,37 @@ def test_markdown_extraction_next_hint_never_points_at_the_viewer(cli, tmp_path)
     line = summary_next_line(result.stdout)
     assert "ade history list" in line
     assert "ade view" not in line
+
+
+def test_extract_summary_and_payload_name_the_server_run_never_job(
+    cli, document, schema_file
+):
+    """#153, extract side: `run:` in the summary, run_id in the payload,
+    "job" only inside "job item"."""
+    parse_id = parse_doc(cli, document)
+    payload = complete_extract(cli, parse_id, "--schema", str(schema_file))
+    assert payload["run_id"] == "extract-0001"
+    assert "job_id" not in payload
+
+    # The cached re-run serves the same summary shape, human mode.
+    human = cli.invoke(
+        "extract", parse_id, "--schema", str(schema_file), env=AUTH_ENV
+    )
+    assert human.exit_code == 0
+    assert "\n  run:      extract-0001" in human.stdout
+    assert "job:" not in human.stdout
+
+
+def test_empty_schema_blocks_extract_d_before_the_parse_first_phase(cli, document):
+    """#154 must gate ahead of *both* billable steps: `extract -d` on a
+    never-parsed document would otherwise run (and bill) the standalone
+    parse before the extract submit ever validated the schema."""
+    result = cli.invoke(
+        "extract", "-d", str(document),
+        "--schema", '{"type": "object", "properties": {}}',
+        "--json", env=AUTH_ENV,
+    )
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "empty_schema"
+    assert cli.transport.requests == []  # no parse-first, no extract, nothing

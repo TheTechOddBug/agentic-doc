@@ -108,3 +108,98 @@ def test_id_only_does_not_leak_into_the_next_in_process_run(cli, document):
     payload = json.loads(cli.invoke("history", "list", "--json").stdout)
 
     assert isinstance(payload, list) and payload
+
+
+# --- Click validation errors honor the machine output modes (#155) --------
+
+
+def test_json_covers_click_validation_errors_missing_option(cli):
+    """`--json` must yield JSON on stdout for *every* error — including the
+    ones Click raises before any command body runs."""
+    result = cli.invoke("extract", "some-item-id", "--json")
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "missing_option"
+    assert payload["param"] == "--schema"
+    assert "--schema" in payload["message"]
+
+
+def test_json_covers_click_validation_errors_bad_value(cli, tmp_path):
+    result = cli.invoke(
+        "parse", "-d", str(tmp_path / "does-not-exist.pdf"), "--json"
+    )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "bad_parameter"
+    assert "does not exist" in payload["message"]
+    assert "--document" in payload["param"]
+
+
+def test_json_covers_click_validation_errors_unknown_flag(cli):
+    result = cli.invoke("history", "list", "--no-such-flag", "--json")
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "no_such_option"
+    assert payload["option"] == "--no-such-flag"
+
+
+def test_click_validation_without_json_keeps_the_usage_rendering(cli):
+    """No --json, no JSON: the default human rendering stays exactly as
+    Click/typer ships it."""
+    result = cli.invoke("extract", "some-item-id")
+
+    assert result.exit_code == 2
+    assert not result.stdout.strip().startswith("{")
+
+
+def test_id_only_keeps_click_validation_errors_off_stdout(cli):
+    result = cli.invoke("extract", "some-item-id", "--id-only")
+
+    assert result.exit_code == 2
+    assert result.stdout.strip() == ""
+    assert "--schema" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "code"),
+    [
+        # Every band of the tree, one Click failure mode each — the hook
+        # lives on the root group, so nested groups and every leaf must
+        # come out structured, not just the two commands QA reproduced.
+        (["parse", "-d", "/no/such/file.pdf"], "bad_parameter"),
+        (["parse", "-d", "x", "--tier", "bogus"], "bad_parameter"),
+        (["parse", "-d", "x", "--wait", "abc"], "bad_parameter"),
+        (["extract", "some-item"], "missing_option"),
+        (["view", "abc", "--dpi", "0"], "bad_parameter"),
+        (["crop", "abc", "--dpi", "0"], "bad_parameter"),
+        (["find", "abc", "--no-such-flag"], "no_such_option"),
+        (["history", "clear", "a", "b"], "usage"),
+        (["auth", "login", "--no-such-flag"], "no_such_option"),
+        (["update", "--no-such-flag"], "no_such_option"),
+        (["version", "--no-such-flag"], "no_such_option"),
+        (["no-such-command"], "usage"),
+    ],
+)
+def test_json_covers_click_validation_across_the_whole_tree(cli, args, code):
+    """#155 holds for every command, nested groups included: the hook sits
+    on the root group's make_context/invoke, which all of them run
+    through."""
+    result = cli.invoke(*args, "--json")
+
+    assert result.exit_code == 2, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["error"] == code
+    assert payload["message"]
+
+
+def test_a_literal_json_token_after_the_separator_is_data_not_a_flag(cli):
+    """`ade find ID -- --json` searches for the literal string "--json";
+    a usage error there must keep the default rendering — the invocation
+    never asked for machine output."""
+    result = cli.invoke("find", "--no-such-flag", "--", "--json")
+
+    assert result.exit_code == 2
+    assert not result.stdout.strip().startswith("{")

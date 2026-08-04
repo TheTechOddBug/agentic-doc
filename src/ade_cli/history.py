@@ -35,7 +35,7 @@ def _history_default(ctx: typer.Context, as_json: bool = JSON_FLAG) -> None:
 
 
 def require_job_id(token: str | None, *, as_json: bool) -> str:
-    """Usage gate for commands targeting one JOB_ID argument. Typer's own
+    """Usage gate for commands targeting one JOB_ITEM_ID argument. Typer's own
     missing-argument error bypasses the output convention (no JSON on
     stdout, no remediation), so the argument is optional at the CLI layer
     and required here, where the error can follow the contract."""
@@ -45,8 +45,8 @@ def require_job_id(token: str | None, *, as_json: bool) -> str:
         "Provide a job item id (or unambiguous prefix); run "
         "`ade history list` to see the store."
     )
-    # "job_item_id", never "job_id": the latter names the *server* job in
-    # every machine payload (CONTEXT.md keeps the two distinct).
+    # "job_item_id", never "run_id": the latter names the *server-side run*
+    # in every machine payload (CONTEXT.md keeps the two distinct).
     emit({"error": "missing_job_item_id", "message": message}, message, as_json=as_json)
     raise typer.Exit(code=EXIT_USAGE)
 
@@ -129,6 +129,14 @@ def _plain_line(record: dict, indent: bool) -> str:
     )
     if (record.get("parse") or {}).get("missing"):
         line += "  (parse missing)"
+    if record.get("stale"):
+        line += "  (stale)"
+        # Why the mark is there and what refreshes it, visible without
+        # --json (same posture as the reason/partial annotations).
+        line += (
+            "\n    stale: the referenced parse was re-run (--force) after "
+            "this extraction; re-run `ade extract` to refresh it"
+        )
     if record["reason"]:
         # An unreadable ticket's diagnosis, visible without --json.
         line += f"\n    reason: {record['reason']}"
@@ -246,6 +254,16 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
             *row[3:],
             source,
         )
+        if record.get("stale"):
+            # Stale extraction (its parse was --force re-run): advisory,
+            # amber like the viewer's stale badge — never the failure red.
+            stale = (
+                "stale: parse re-run after this extraction — "
+                "re-run `ade extract` to refresh"
+            )
+            if len(stale) > budget:
+                stale = stale[: budget - 1] + "…"
+            table.add_row(*blanks, Text(stale, style="yellow"))
         if record["reason"]:
             # An unreadable ticket's diagnosis, visible without --json;
             # cropped to the column (the full text lives in --json).
@@ -299,7 +317,7 @@ def _overhead(columns: int) -> int:
 def clear(
     ctx: typer.Context,
     job_id: str | None = typer.Argument(
-        None, metavar="[JOB_ID]", help="Job item id or unambiguous prefix."
+        None, metavar="[JOB_ITEM_ID]", help="Job item id or unambiguous prefix."
     ),
     clear_all: bool = typer.Option(False, "--all", help="Delete every stored job item."),
     as_json: bool = JSON_FLAG,
@@ -309,8 +327,8 @@ def clear(
     dangling refs."""
     if (job_id is None) == (not clear_all):
         emit(
-            {"error": "bad_target", "message": "Provide exactly one of JOB_ID or --all."},
-            "Provide exactly one of JOB_ID or --all.",
+            {"error": "bad_target", "message": "Provide exactly one of JOB_ITEM_ID or --all."},
+            "Provide exactly one of JOB_ITEM_ID or --all.",
             as_json=as_json,
         )
         raise typer.Exit(code=EXIT_USAGE)

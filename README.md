@@ -136,7 +136,7 @@ source path × content × params` — one flat folder under
 `parse` is a guarantee: re-running the exact same invocation is served from
 disk with zero API calls (`--force` re-parses in place); changed params —
 or a moved/edited file — mint a *sibling* job item, so variants coexist and
-nothing is silently replaced; a pending job is resumed, never resubmitted;
+nothing is silently replaced; a pending run is resumed, never resubmitted;
 Ctrl-C stops the waiting, not the work — the same command resumes.
 Exit codes: `0` parsed, `1` failed, `2` usage, `3` still pending (re-run the
 same command to resume), `4` rate-limited before submit.
@@ -153,7 +153,7 @@ ade parse -d doc.pdf --id-only                    # re-run to resume; same id
 
 | command | what it does |
 |---|---|
-| `ade extract JOB_ID --schema schema.json` | extract a completed parse job item |
+| `ade extract JOB_ITEM_ID --schema schema.json` | extract a completed parse job item |
 | `ade extract -d invoice.pdf --schema '…'` | by path: reuse the latest parse, else parse first |
 | `ade extract --markdown notes.md --schema '…'` | bring-your-own markdown |
 | `ade extract --markdown-url https://…/notes.md --schema schema.json` | bring-your-own markdown, fetched by the server |
@@ -161,17 +161,19 @@ ade parse -d doc.pdf --id-only                    # re-run to resume; same id
 Every extraction is its own top-level job item. Given a parse job item id,
 the extract item *references* the parse (`parse/ref.json`) — artifacts are
 never copied — and **inherits the parse item's environment** (its
-server-side parse job exists nowhere else; a conflicting `--env` is
+server-side parse run exists nowhere else; a conflicting `--env` is
 refused). Given a document path, the latest completed parse of that
 path+content in the target environment is reused (logged, referenced like
 the id form); if none
-exists the CLI **runs a standalone parse job first** — a normal top-level
+exists the CLI **runs a standalone parse first** — a normal top-level
 parse item, exactly as if you had run `parse -d` — then the extract
 referencing it, both bills itemised in one summary. Every parse the CLI
 runs is reusable, so repeated `extract -d` on a never-parsed document
 bills the parse exactly once. Bring-your-own markdown is copied in as
 `markdown.md` (spans index exactly those bytes); it has no parse edge, so
-evidence degrades to spans-only.
+evidence degrades to spans-only. The schema must define at least one
+property — an empty schema is refused locally (`empty_schema`) before
+anything is submitted or billed.
 
 The extraction itself is on stdout: `--json` carries the schema-shaped
 result under `extraction`, alongside the per-field `evidence` join —
@@ -187,16 +189,16 @@ ade extract $JOB --schema schema.json --json | jq .extraction
 | command | what it does |
 |---|---|
 | `ade view` | the latest *viewable* job item's HTML viewer (opens in your browser on a terminal) |
-| `ade view JOB_ID` | a specific job item (id or unambiguous prefix) |
-| `ade view JOB_ID --element-id ELEMENT_ID` | deep link straight to one element |
-| `ade crop JOB_ID --element-id ELEMENT_ID` | PNG of just that element's region |
-| `ade crop JOB_ID --type figure` | PNG of every figure — one command, no loop |
-| `ade crop JOB_ID --all -o ./crops` | every element, into a directory you pick |
+| `ade view JOB_ITEM_ID` | a specific job item (id or unambiguous prefix) |
+| `ade view JOB_ITEM_ID --element-id ELEMENT_ID` | deep link straight to one element |
+| `ade crop JOB_ITEM_ID --element-id ELEMENT_ID` | PNG of just that element's region |
+| `ade crop JOB_ITEM_ID --type figure` | PNG of every figure — one command, no loop |
+| `ade crop JOB_ITEM_ID --all -o ./crops` | every element, into a directory you pick |
 
 On a terminal, `view` opens the viewer in your browser by default
 (`--no-open` suppresses it); `--json` runs and piped output never
 launch a browser — the artifact path is in the output either way.
-Without a JOB_ID, `view` targets the latest viewable job item.
+Without a JOB_ITEM_ID, `view` targets the latest viewable job item.
 
 Every job item gets a **self-contained `view.html`**: page images with
 bounding-box overlays beside the parsed markdown (or extraction JSON),
@@ -207,10 +209,11 @@ both sides. `crop` cuts element regions straight out of the source
 document (`--dpi`, default 300) — visual evidence for an answer, one
 command. Address one element with `--element-id` (ids from `ade find`),
 or crop in batch with the very same filters `find` searches by:
-`--type figure`, `--page 3`, `--all`. A batch writes one PNG per element
-into the job item's `crops/` (or a directory you name with `-o`) and
-returns them as `crops[]`; a single `--element-id` returns the one crop
-flat. Everything renders from the
+`--type figure`, `--page 3`, `--all`. Crops land in the job item's
+`crops/` (or a directory you name with `-o`; a single crop's `-o` may
+also name the PNG path itself), and `--json` always returns the same
+shape — `count` plus one `crops[]` record per PNG — whether one element
+matched or many. Everything renders from the
 local store: zero API calls, rebuilds fingerprint-gated. Long documents
 stay browsable end to end — the artifact embeds the first 40 pages and
 loads the rest on demand from sidecar files rendered into the store.
@@ -222,17 +225,20 @@ loads the rest on demand from sidecar files rendered into the store.
 | `ade history` | defaults to `ade history list` |
 | `ade history list` | one row per job item: id, kind, state, params, source |
 | `ade history list --json` | full records (params verbatim, timestamps, linkage) |
-| `ade history clear JOB_ID` | delete an item; clearing a parse cascades to its extracts |
+| `ade history clear JOB_ITEM_ID` | delete an item; clearing a parse cascades to its extracts |
 | `ade history clear --all` | delete every stored job item |
 
 The read model over the store — zero API calls; states derive from tickets
 and artifacts on disk. Extract items referencing a parse render as indented
-child rows beneath it. Every `history`/`view` run re-scans `jobs/` and
-rewrites `~/.ade/history.js` (the viewer sidebar's read model), so manually
-deleted folders simply vanish from listings.
+child rows beneath it; an extraction whose parse was re-run in place with
+`--force` is marked **stale** (listing annotation, `"stale": true` in
+`--json`, and an amber mark with a hover tooltip in the viewer sidebar) —
+re-run `ade extract` to refresh it. Every `history`/`view` run re-scans
+`jobs/` and rewrites `~/.ade/history.js` (the viewer sidebar's read model),
+so manually deleted folders simply vanish from listings.
 
 Commands that read the store (`view`, `crop`, `find`, `history clear`,
-`extract JOB_ID`) take a **job item id or an unambiguous prefix** — paths
+`extract JOB_ITEM_ID`) take a **job item id or an unambiguous prefix** — paths
 are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
 `ade history list` when you have a path and need an id.
 
@@ -240,10 +246,10 @@ are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
 
 | command | what it does |
 |---|---|
-| `ade find JOB_ID "total"` | case-insensitive substring |
+| `ade find JOB_ITEM_ID "total"` | case-insensitive substring |
 | `ade find --job ITEM_A --job ITEM_B --json "€42"` | multi-item (`--job`, repeatable), tagged by `job_item_id` |
-| `ade find JOB_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
-| `ade find JOB_ID --page 1 --limit 5` | no query = every element |
+| `ade find JOB_ITEM_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
+| `ade find JOB_ITEM_ID --page 1 --limit 5` | no query = every element |
 
 Pure local search over a parse job item's elements projection — zero API
 calls, no ranking. All filters compose (AND): QUERY (substring, or a regex

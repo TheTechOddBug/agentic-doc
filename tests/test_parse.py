@@ -356,7 +356,7 @@ def test_json_payload_carries_the_contract_fields(cli, document):
 
     payload = json.loads(result.stdout)
     assert payload["status"] == "parsed"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     assert payload["job_item_id"] == item_dir(cli, document).name
     assert payload["version"] == MODEL_VERSION
     assert payload["credits"] == 2.5
@@ -364,7 +364,7 @@ def test_json_payload_carries_the_contract_fields(cli, document):
     assert payload["store_dir"] == str(item_dir(cli, document))
     assert payload["artifacts"] == ["parse.json", "parse.md", "elements.json"]
     assert set(payload) == {
-        "status", "job_id", "job_item_id", "environment", "version",
+        "status", "run_id", "job_item_id", "environment", "version",
         "credits", "tier", "page_count", "failed_pages", "cached", "stored",
         "store_dir", "artifacts",
     }
@@ -478,7 +478,7 @@ def test_wait_zero_submits_and_returns_without_polling(cli, document):
     assert result.exit_code == 3  # pending is a distinct outcome, not failure
     payload = json.loads(result.stdout)
     assert payload["status"] == "pending"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     assert payload["job_item_id"] == item_dir(cli, document).name
     assert len(cli.transport.requests) == 1  # submit only, no poll
     assert json.loads((item_dir(cli, document) / "job.json").read_text())["job_id"] == JOB_ID
@@ -581,7 +581,7 @@ def test_completed_without_inline_result_is_a_controlled_error(cli, document):
     assert result.exit_code == 1
     payload = json.loads(result.stdout)  # controlled output, no traceback
     assert payload["error"] == "missing_result"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
 
 
 def test_unknown_job_status_is_a_controlled_error(cli, document):
@@ -617,3 +617,42 @@ def test_poll_backs_off_through_the_injected_clock(cli, document):
 
     assert result.exit_code == 0
     assert cli.clock.sleeps == [1.0, 1.5, 2.25, 3.375]  # x1.5 backoff
+
+
+def test_summary_and_payload_name_the_server_run_never_job(cli, document):
+    """#153: the server-side id is a *run* everywhere user-facing — the
+    summary line and the payload key — while "job" survives only inside
+    "job item". (The wire and the on-disk store still spell job_id.)"""
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+
+    human = cli.invoke("parse", "-d", str(document), env=AUTH_ENV)
+    assert human.exit_code == 0
+    assert f"\n  run:     {JOB_ID}" in human.stdout
+    assert "job:" not in human.stdout
+    assert "job item" in human.stdout  # the local unit keeps its name
+
+    payload = json.loads(
+        cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV).stdout
+    )
+    assert payload["run_id"] == JOB_ID
+    assert "job_id" not in payload
+    # The store format is deliberately unrenamed.
+    ticket = json.loads((item_dir(cli, document) / "job.json").read_text())
+    assert ticket["job_id"] == JOB_ID
+
+
+def test_pending_payload_names_the_run_never_job(cli, document):
+    cli.transport.respond(202, {"job_id": JOB_ID})
+
+    result = cli.invoke(
+        "parse", "-d", str(document), "--wait", "0", "--json", env=AUTH_ENV
+    )
+
+    assert result.exit_code == 3
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "status": "pending",
+        "run_id": JOB_ID,
+        "job_item_id": item_dir(cli, document).name,
+    }
