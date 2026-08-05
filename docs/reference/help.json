@@ -12,7 +12,7 @@
     },
     {
       "name": "job item ids",
-      "rule": "Store commands take a job item id or an unambiguous prefix. Discover ids with `history list`; ambiguous or unknown ids error with candidates listed."
+      "rule": "Store commands take a job item id or an unambiguous prefix. Discover ids with `history list`; ambiguous or unknown ids error with candidates listed. Distinct from the server-side run id: --json payloads report that as run_id, and on-disk records spell the same value job_id (the wire's name) \u2014 neither is ever a job item id."
     },
     {
       "name": "guarantees",
@@ -468,6 +468,13 @@
           "help": "Re-parse even if already parsed, or abandon an unreadable job for a fresh one (bills a new parse)."
         },
         {
+          "flags": "--keep-copy",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "--document-url only: also download the document into the job item (plain HTTP, no API credits) so page previews and crops render locally \u2014 fetched now, while the URL (often pre-signed) still works. Without it, URL parses have no local bytes and the viewer explains how to fetch them later (`ade view <id> --download`)."
+        },
+        {
           "flags": "--include",
           "metavar": "markdown|elements",
           "required": false,
@@ -545,6 +552,14 @@
           {
             "key": "elements",
             "what": "the flat projection \u2014 only with --include elements"
+          },
+          {
+            "key": "kept_copy",
+            "what": "with --keep-copy: whether the URL document's copy was stored in the job item"
+          },
+          {
+            "key": "keep_copy_error",
+            "what": "with --keep-copy: why the copy could not be stored (the parse itself still succeeded)"
           }
         ]
       },
@@ -734,10 +749,32 @@
     },
     {
       "name": "history list",
-      "usage": "ade history list [--json]",
-      "summary": "List stored job items: id, kind, state, env, params, source. Extract\nitems referencing a parse item indent beneath it. Bare `ade history`\ndefaults to this command.",
+      "usage": "ade history list [options] [--json]",
+      "summary": "List stored job items: id, kind, state, env, params, source \u2014\nthe newest 100 submissions first (--limit/--all adjust, --asc for\noldest first). Extract items referencing a parse item indent\nbeneath it. Bare `ade history` defaults to this command.",
       "arguments": [],
-      "flags": [],
+      "flags": [
+        {
+          "flags": "--asc",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Oldest submission first (the pre-1.0.3 order). The listing defaults to newest first \u2014 the run you just did leads, matching the viewer sidebar."
+        },
+        {
+          "flags": "--limit",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": 100,
+          "help": "Keep only the newest N items (default 100), whatever the order; --all lifts the cap."
+        },
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "List every stored job item \u2014 no limit."
+        }
+      ],
       "supports_json": true,
       "result": {
         "shape": "array",
@@ -778,7 +815,8 @@
             "key": "created_at / completed_at",
             "what": "epoch seconds (null when unknown)"
           }
-        ]
+        ],
+        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. Capped at the newest 100 items by default \u2014 --limit N adjusts, --all lifts the cap, and a capped run says so up front (the first line of the listing; on stderr for --json). The --json array follows the same order and cap."
       },
       "band": "local read models"
     },
@@ -961,6 +999,13 @@
           "help": "Pages to embed images for, 1-indexed, e.g. '1,3-5'."
         },
         {
+          "flags": "--download",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "URL-parsed items: fetch the document from its recorded URL into the job item and render page previews from that copy \u2014 the parse itself never gives the CLI the bytes (#169). Plain HTTP, no API credits; the copy is unverified against the parsed run. Also works on an extract item id (fetches into its referenced parse item)."
+        },
+        {
           "flags": "--no-sidebar-sync",
           "metavar": null,
           "required": false,
@@ -1013,6 +1058,10 @@
           {
             "key": "note",
             "what": "why the render weakened, when it did (else null)"
+          },
+          {
+            "key": "downloaded",
+            "what": "with --download: true when this run fetched the URL document into the job item (false: already attached)"
           },
           {
             "key": "deep_link",
@@ -1238,6 +1287,7 @@
   ],
   "store": {
     "home": "~/.ade (ADE_HOME overrides)",
+    "note": "On-disk records (meta.json, job.json, parse/ref.json) spell the server-side run id as job_id \u2014 the wire contract's name for the same value --json payloads report as run_id. Neither is the job item id (the jobs/<id>/ folder name).",
     "layout": [
       {
         "path": "~/.ade/config.json",
@@ -1257,7 +1307,7 @@
       },
       {
         "path": "  meta.json",
-        "what": "commit record: kind, source, identity, params, state, timestamps, artifact index"
+        "what": "commit record: kind, source, identity, params, state, timestamps, artifact index. Its job_id field is the server-side run id (= run_id in --json payloads), never the job item id"
       },
       {
         "path": "  job.json",
@@ -1278,6 +1328,10 @@
       {
         "path": "  markdown.md",
         "what": "bring-your-own-markdown extract items: the input markdown, copied in (spans index exactly these bytes)"
+      },
+      {
+        "path": "  document.<ext>",
+        "what": "URL parses: the attached document copy (`parse --keep-copy` / `view --download`) page previews and crops render from \u2014 unverified against the parsed run"
       },
       {
         "path": "  view.html / crops/",

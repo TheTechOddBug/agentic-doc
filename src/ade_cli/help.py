@@ -182,6 +182,10 @@ RESULTS: dict[str, dict] = {
             ("artifacts", "artifact filenames written there"),
             ("markdown", "the parse markdown — only with --include markdown"),
             ("elements", "the flat projection — only with --include elements"),
+            ("kept_copy", "with --keep-copy: whether the URL document's "
+             "copy was stored in the job item"),
+            ("keep_copy_error", "with --keep-copy: why the copy could not "
+             "be stored (the parse itself still succeeded)"),
         ],
     },
     "extract": {
@@ -248,6 +252,8 @@ RESULTS: dict[str, dict] = {
             ("built", "true when this run rebuilt the artifact"),
             ("pages_embedded", "pages inlined; the rest load from sidecars"),
             ("note", "why the render weakened, when it did (else null)"),
+            ("downloaded", "with --download: true when this run fetched "
+             "the URL document into the job item (false: already attached)"),
             ("deep_link", "view.html#element=... when --element-id was given"),
             ("history_items", "items in the rebuilt sidebar read model"),
             ("sidebar_sync", "true when sibling viewers build in the background"),
@@ -268,6 +274,12 @@ RESULTS: dict[str, dict] = {
              "--force re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
+        "note": "Ordered newest submission first (timestamp-less items "
+        "last), matching the viewer sidebar; --asc restores oldest-first. "
+        "Capped at the newest 100 items by default — --limit N adjusts, "
+        "--all lifts the cap, and a capped run says so up front (the "
+        "first line of the listing; on stderr for --json). The --json "
+        "array follows the same order and cap.",
     },
     "history clear": {
         "shape": "object",
@@ -403,7 +415,10 @@ CONVENTIONS = [
         "job item ids",
         "Store commands take a job item id or an unambiguous prefix. "
         "Discover ids with `history list`; ambiguous or unknown ids error "
-        "with candidates listed.",
+        "with candidates listed. Distinct from the server-side run id: "
+        "--json payloads report that as run_id, and on-disk records spell "
+        "the same value job_id (the wire's name) — neither is ever a "
+        "job item id.",
     ),
     (
         "guarantees",
@@ -444,7 +459,8 @@ STORE_LAYOUT = [
     {
         "path": "  meta.json",
         "what": "commit record: kind, source, identity, params, state, "
-        "timestamps, artifact index",
+        "timestamps, artifact index. Its job_id field is the server-side "
+        "run id (= run_id in --json payloads), never the job item id",
     },
     {
         "path": "  job.json",
@@ -470,6 +486,12 @@ STORE_LAYOUT = [
         "path": "  markdown.md",
         "what": "bring-your-own-markdown extract items: the input markdown, "
         "copied in (spans index exactly these bytes)",
+    },
+    {
+        "path": "  document.<ext>",
+        "what": "URL parses: the attached document copy (`parse "
+        "--keep-copy` / `view --download`) page previews and crops render "
+        "from — unverified against the parsed run",
     },
     {
         "path": "  view.html / crops/",
@@ -651,6 +673,7 @@ def _human(reference: dict, *, scoped: bool) -> str:
     lines.append("store layout")
     for entry in reference["store"]["layout"]:
         lines.append(f"  {entry['path']:<42}  {entry['what']}")
+    lines.append(f"  note: {reference['store']['note']}")
     lines.append("")
     lines.append("topics — conceptual pages, e.g. `ade help workflow`")
     for topic in reference["topics"]:
@@ -727,6 +750,12 @@ def help_command(
         "exit_states": EXIT_STATES,
         "store": {
             "home": "~/.ade (ADE_HOME overrides)",
+            # One vocabulary note for every on-disk record: job_id there
+            # is the wire's spelling of the run id.
+            "note": "On-disk records (meta.json, job.json, parse/ref.json) "
+            "spell the server-side run id as job_id — the wire contract's "
+            "name for the same value --json payloads report as run_id. "
+            "Neither is the job item id (the jobs/<id>/ folder name).",
             "layout": STORE_LAYOUT,
         },
     }
