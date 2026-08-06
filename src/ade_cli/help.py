@@ -237,6 +237,9 @@ RESULTS: dict[str, dict] = {
             ("directory", "where they landed"),
             ("crops", "one record per PNG (element_id, type, "
              "page, box, dpi, path, width, height)"),
+            ("downloaded", "URL items: true when this run fetched the "
+             "document into the parse item before cropping (absent when "
+             "nothing needed fetching)"),
         ],
         "note": "One shape whatever matched: a single --element-id is "
         "count 1 with one crops[] record; a filter (--type/--page/--all) "
@@ -252,8 +255,13 @@ RESULTS: dict[str, dict] = {
             ("built", "true when this run rebuilt the artifact"),
             ("pages_embedded", "pages inlined; the rest load from sidecars"),
             ("note", "why the render weakened, when it did (else null)"),
-            ("downloaded", "with --download: true when this run fetched "
-             "the URL document into the job item (false: already attached)"),
+            ("downloaded", "URL items: true when this run fetched the "
+             "document into the job item (automatic on first view). false "
+             "when the automatic fetch failed (see download_error) or "
+             "explicit --download found the copy already attached; absent "
+             "when nothing needed fetching"),
+            ("download_error", "why the automatic fetch failed, when it "
+             "did (the viewer still builds, previews empty; else absent)"),
             ("deep_link", "view.html#element=... when --element-id was given"),
             ("history_items", "items in the rebuilt sidebar read model"),
             ("sidebar_sync", "true when sibling viewers build in the background"),
@@ -490,8 +498,9 @@ STORE_LAYOUT = [
     {
         "path": "  document.<ext>",
         "what": "URL parses: the attached document copy (`parse "
-        "--keep-copy` / `view --download`) page previews and crops render "
-        "from — unverified against the parsed run",
+        "--keep-copy`, or fetched automatically on first `view`/`crop`) "
+        "page previews and crops render from — unverified against the "
+        "parsed run",
     },
     {
         "path": "  view.html / crops/",
